@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from utils.jwt_helpers import get_current_user
 import cv2
@@ -27,7 +27,7 @@ def detect_emotions():
         user_id = current_user['id']
         
         # Get model service from app context
-        model_service = request.app.model_service
+        model_service = current_app.model_service
         if not model_service:
             return jsonify({'error': 'ML models not loaded'}), 503
         

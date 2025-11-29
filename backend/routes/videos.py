@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, send_from_directory
+from flask import Blueprint, request, jsonify, send_from_directory, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from utils.jwt_helpers import get_current_user
 from werkzeug.utils import secure_filename
@@ -66,7 +66,7 @@ def upload_video():
         logger.info(f"File validation passed: {file.filename}")
         
         # Ensure upload directory exists
-        upload_dir = request.app.config['UPLOAD_FOLDER']
+        upload_dir = current_app.config['UPLOAD_FOLDER']
         os.makedirs(upload_dir, exist_ok=True)
         
         # Generate unique filename
@@ -152,10 +152,10 @@ def upload_video():
 @jwt_required()
 def get_videos():
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         logger.info(f"Token validated for videos: {current_user}")
         
-        if not current_user or 'id' not in current_user or 'role' not in current_user:
+        if not current_user['id'] or not current_user['role']:
             logger.error(f"Invalid user data from token: {current_user}")
             return jsonify({'error': 'Invalid token payload'}), 422
         
