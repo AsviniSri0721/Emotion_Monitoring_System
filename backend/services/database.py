@@ -122,16 +122,16 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
     """Execute a database query"""
     conn = get_connection()
     if not conn:
-        return None
+        logger.error("No database connection available")
+        raise Exception("Database connection failed")
     
     try:
         cursor = conn.cursor()
         
-        # Convert PostgreSQL placeholders (%s) to MySQL placeholders if needed
-        if db_type == 'mysql' and '%s' in query:
-            # MySQL uses %s, so no conversion needed for pymysql
-            # But mysql-connector uses %s too, so it's fine
-            pass
+        # Log query for debugging (remove in production)
+        logger.debug(f"Executing query: {query[:100]}...")
+        if params:
+            logger.debug(f"With params: {params}")
         
         cursor.execute(query, params)
         
@@ -148,8 +148,12 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         
     except Exception as e:
         conn.rollback()
-        logger.error(f"Database query error: {str(e)}")
-        raise
+        error_msg = str(e)
+        logger.error(f"Database query error: {error_msg}")
+        logger.error(f"Query: {query[:200]}")
+        if params:
+            logger.error(f"Params: {params}")
+        raise Exception(f"Database error: {error_msg}")
     finally:
         return_connection(conn)
 

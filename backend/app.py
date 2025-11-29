@@ -26,7 +26,16 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max file size
 
 # Initialize extensions
 jwt = JWTManager(app)
-CORS(app)
+CORS(app, 
+     resources={r"/api/*": {
+         "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
+         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+         "allow_headers": ["Content-Type", "Authorization"],
+         "expose_headers": ["Content-Type"],
+         "supports_credentials": True
+     }},
+     supports_credentials=True,
+     automatic_options=True)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -65,6 +74,28 @@ def serve_video(filename):
     """Serve video files"""
     from flask import send_from_directory
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
+# JWT error handlers
+@jwt.expired_token_loader
+def expired_token_callback(jwt_header, jwt_payload):
+    return jsonify({'error': 'Token has expired'}), 401
+
+@jwt.invalid_token_loader
+def invalid_token_callback(error):
+    return jsonify({'error': 'Invalid token', 'details': str(error)}), 422
+
+@jwt.unauthorized_loader
+def missing_token_callback(error):
+    return jsonify({'error': 'Authorization token is missing'}), 401
+
+# Error handlers
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({'error': 'File too large', 'max_size': '500MB'}), 413
+
+@app.errorhandler(400)
+def bad_request(error):
+    return jsonify({'error': 'Bad request', 'details': str(error)}), 400
 
 @app.route('/api/health', methods=['GET'])
 def health_check():

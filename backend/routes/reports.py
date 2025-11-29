@@ -12,6 +12,89 @@ def generate_uuid_str():
     """Generate UUID string for database"""
     return str(uuid.uuid4())
 
+@bp.route('/dashboard/all', methods=['GET'])
+@jwt_required()
+def get_all_reports():
+    """GET endpoint to fetch all engagement reports for the dashboard"""
+    try:
+        current_user = get_jwt_identity()
+        
+        # Teachers see reports for all their sessions, students see their own reports
+        if current_user['role'] == 'teacher':
+            reports = execute_query(
+                """SELECT er.id, er.session_type, er.session_id, er.student_id,
+                          er.overall_engagement, er.average_emotion, er.engagement_drops,
+                          er.focus_percentage, er.boredom_percentage, er.confusion_percentage,
+                          er.sleepiness_percentage, er.generated_at,
+                          CONCAT(u.first_name, ' ', u.last_name) as student_name,
+                          CASE 
+                              WHEN er.session_type = 'live' THEN ls.title
+                              WHEN er.session_type = 'recorded' THEN v.title
+                              ELSE 'Unknown'
+                          END as session_title
+                   FROM engagement_reports er
+                   JOIN users u ON er.student_id = u.id
+                   LEFT JOIN live_sessions ls ON er.session_type = 'live' AND er.session_id = ls.id
+                   LEFT JOIN videos v ON er.session_type = 'recorded' AND er.session_id = v.id
+                   WHERE (er.session_type = 'live' AND ls.teacher_id = %s)
+                      OR (er.session_type = 'recorded' AND v.teacher_id = %s)
+                   ORDER BY er.generated_at DESC
+                   LIMIT 50""",
+                (current_user['id'], current_user['id']),
+                fetch_all=True
+            )
+        else:
+            # Students see their own reports
+            reports = execute_query(
+                """SELECT er.id, er.session_type, er.session_id, er.student_id,
+                          er.overall_engagement, er.average_emotion, er.engagement_drops,
+                          er.focus_percentage, er.boredom_percentage, er.confusion_percentage,
+                          er.sleepiness_percentage, er.generated_at,
+                          CONCAT(u.first_name, ' ', u.last_name) as student_name,
+                          CASE 
+                              WHEN er.session_type = 'live' THEN ls.title
+                              WHEN er.session_type = 'recorded' THEN v.title
+                              ELSE 'Unknown'
+                          END as session_title
+                   FROM engagement_reports er
+                   JOIN users u ON er.student_id = u.id
+                   LEFT JOIN live_sessions ls ON er.session_type = 'live' AND er.session_id = ls.id
+                   LEFT JOIN videos v ON er.session_type = 'recorded' AND er.session_id = v.id
+                   WHERE er.student_id = %s
+                   ORDER BY er.generated_at DESC
+                   LIMIT 50""",
+                (current_user['id'],),
+                fetch_all=True
+            )
+        
+        # Convert to list of dicts
+        report_list = []
+        for row in reports:
+            report_list.append({
+                'id': row[0],
+                'session_type': row[1],
+                'session_id': row[2],
+                'student_id': row[3],
+                'overall_engagement': float(row[4]) if row[4] else 0.0,
+                'average_emotion': row[5],
+                'engagement_drops': row[6],
+                'focus_percentage': float(row[7]) if row[7] else 0.0,
+                'boredom_percentage': float(row[8]) if row[8] else 0.0,
+                'confusion_percentage': float(row[9]) if row[9] else 0.0,
+                'sleepiness_percentage': float(row[10]) if row[10] else 0.0,
+                'generated_at': row[11].isoformat() if row[11] else None,
+                'student_name': row[12],
+                'session_title': row[13]
+            })
+        
+        return jsonify({'reports': report_list}), 200
+        
+    except Exception as e:
+        logger.error(f"Get reports error: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': 'Failed to fetch reports', 'details': str(e)}), 500
+
 @bp.route('/generate/<session_type>/<session_id>', methods=['POST'])
 @jwt_required()
 def generate_report(session_type, session_id):

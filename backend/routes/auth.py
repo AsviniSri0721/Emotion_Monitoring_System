@@ -111,7 +111,14 @@ def login():
 def get_current_user():
     try:
         current_user = get_jwt_identity()
+        logger.info(f"Token validated for user: {current_user}")
+        
+        if not current_user or 'id' not in current_user:
+            logger.error("Invalid token payload: missing user id")
+            return jsonify({'error': 'Invalid token payload'}), 422
+        
         user_id = current_user['id']
+        logger.info(f"Fetching user from database: {user_id}")
         
         user = execute_query(
             "SELECT id, email, first_name, last_name, role, created_at FROM users WHERE id = %s",
@@ -120,8 +127,10 @@ def get_current_user():
         )
         
         if not user:
+            logger.error(f"User not found in database: {user_id}")
             return jsonify({'error': 'User not found'}), 404
         
+        logger.info(f"User found: {user[1]}")
         return jsonify({
             'id': str(user[0]),
             'email': user[1],
@@ -133,5 +142,7 @@ def get_current_user():
         
     except Exception as e:
         logger.error(f"Get user error: {str(e)}")
-        return jsonify({'error': 'Failed to fetch user'}), 500
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': 'Failed to fetch user', 'details': str(e)}), 500
 

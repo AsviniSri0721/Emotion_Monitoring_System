@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import './Auth.css';
@@ -8,8 +8,16 @@ const Login: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const { login, user, token, loading } = useAuth();
   const navigate = useNavigate();
+
+  // Redirect if already logged in (but wait for loading to finish)
+  useEffect(() => {
+    if (!loading && user && token) {
+      const redirectPath = user.role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard';
+      navigate(redirectPath, { replace: true });
+    }
+  }, [user, token, loading, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

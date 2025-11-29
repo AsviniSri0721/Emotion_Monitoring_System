@@ -13,21 +13,62 @@ const PrivateRoute: React.FC<{ children: React.ReactNode; allowedRoles: ('teache
   children, 
   allowedRoles 
 }) => {
-  const { user, loading } = useAuth();
+  const { user, loading, token } = useAuth();
 
+  // Show loading while checking authentication
   if (loading) {
     return <div className="loading">Loading...</div>;
   }
 
-  if (!user) {
-    return <Navigate to="/login" />;
+  // Check if user has a valid token (even if user data is still loading)
+  const hasToken = token || localStorage.getItem('token');
+  
+  // If no token at all, redirect to login
+  if (!hasToken) {
+    return <Navigate to="/login" replace />;
   }
 
-  if (!allowedRoles.includes(user.role)) {
-    return <Navigate to={user.role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard'} />;
+  // If we have a token but user data is not loaded yet, try to get from localStorage
+  if (hasToken && !user) {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      try {
+        const userData = JSON.parse(storedUser);
+        // If we have cached user data, use it temporarily while waiting for server validation
+        // But still show loading to indicate we're verifying
+        return <div className="loading">Loading...</div>;
+      } catch {
+        // Invalid user data, wait for fetchUser to complete
+        return <div className="loading">Loading...</div>;
+      }
+    }
+    // No cached user, wait for fetchUser
+    return <div className="loading">Loading...</div>;
   }
 
+  // If user is loaded but role doesn't match, redirect to their dashboard
+  if (user && !allowedRoles.includes(user.role)) {
+    return <Navigate to={user.role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard'} replace />;
+  }
+
+  // User is authenticated and has correct role
   return <>{children}</>;
+};
+
+const RootRoute: React.FC = () => {
+  const token = localStorage.getItem('token');
+  const userStr = localStorage.getItem('user');
+  
+  if (token && userStr) {
+    try {
+      const user = JSON.parse(userStr);
+      return <Navigate to={user.role === 'teacher' ? '/teacher/dashboard' : '/student/dashboard'} replace />;
+    } catch {
+      return <Navigate to="/login" replace />;
+    }
+  }
+  
+  return <Navigate to="/login" replace />;
 };
 
 function App() {
@@ -74,7 +115,7 @@ function App() {
             }
           />
           
-          <Route path="/" element={<Navigate to="/login" />} />
+          <Route path="/" element={<RootRoute />} />
         </Routes>
       </Router>
     </AuthProvider>

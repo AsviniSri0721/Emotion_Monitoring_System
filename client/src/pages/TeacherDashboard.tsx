@@ -78,23 +78,62 @@ const TeacherDashboard: React.FC = () => {
 
   const handleVideoUpload = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!uploadForm.file) return;
+    if (!uploadForm.file) {
+      alert('Please select a video file');
+      return;
+    }
+
+    // Validate file size (500MB)
+    const maxSize = 500 * 1024 * 1024; // 500MB
+    if (uploadForm.file.size > maxSize) {
+      alert('File size exceeds 500MB limit');
+      return;
+    }
+
+    // Validate file type
+    const allowedTypes = ['video/mp4', 'video/webm', 'video/ogg', 'video/avi', 'video/quicktime', 'video/x-msvideo'];
+    const allowedExtensions = ['mp4', 'webm', 'ogg', 'avi', 'mov'];
+    const fileExtension = uploadForm.file.name.split('.').pop()?.toLowerCase();
+    
+    if (!fileExtension || !allowedExtensions.includes(fileExtension)) {
+      alert('Invalid file type. Please use: mp4, webm, ogg, avi, or mov');
+      return;
+    }
 
     const formData = new FormData();
     formData.append('video', uploadForm.file);
-    formData.append('title', uploadForm.title);
-    formData.append('description', uploadForm.description);
+    formData.append('title', uploadForm.title || 'Untitled');
+    formData.append('description', uploadForm.description || '');
 
     try {
-      await api.post('/videos/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      console.log('Uploading video:', {
+        title: uploadForm.title,
+        filename: uploadForm.file.name,
+        size: uploadForm.file.size,
+        type: uploadForm.file.type
       });
+
+      const response = await api.post('/videos/upload', formData);
+      
+      console.log('Upload response:', response.data);
+      alert('Video uploaded successfully!');
       setShowUploadModal(false);
       setUploadForm({ title: '', description: '', file: null });
       fetchVideos();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error uploading video:', error);
-      alert('Failed to upload video');
+      console.error('Error response:', error.response);
+      
+      let errorMessage = 'Failed to upload video';
+      if (error.response) {
+        errorMessage = error.response.data?.error || error.response.data?.details || `Server error: ${error.response.status}`;
+      } else if (error.request) {
+        errorMessage = 'No response from server. Check if backend is running on port 5000';
+      } else {
+        errorMessage = error.message;
+      }
+      
+      alert(`Upload failed: ${errorMessage}\n\nCheck:\n1. Backend is running on port 5000\n2. Database connection is working\n3. File size is under 500MB\n4. File format is supported (mp4, webm, ogg, avi, mov)`);
     }
   };
 

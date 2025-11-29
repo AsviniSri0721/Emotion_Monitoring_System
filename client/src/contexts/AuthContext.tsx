@@ -26,34 +26,85 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (token) {
-      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    // Check for existing token on mount
+    const storedToken = localStorage.getItem('token');
+    const storedUser = localStorage.getItem('user');
+    
+    if (storedToken) {
+      setToken(storedToken);
+      api.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
+      
+      // If user data is stored, use it immediately (faster UX)
+      if (storedUser) {
+        try {
+          const userData = JSON.parse(storedUser);
+          setUser(userData);
+          setLoading(false); // Set loading to false immediately if we have cached user
+        } catch (e) {
+          console.error('Error parsing stored user:', e);
+        }
+      }
+      
+      // Verify token is still valid by fetching user from server (in background)
+      // Don't block UI if we have cached user data
       fetchUser();
     } else {
       setLoading(false);
     }
-  }, [token]);
+  }, []); // Only run on mount
 
   const fetchUser = async () => {
     try {
       const response = await api.get('/auth/me');
-      setUser(response.data);
-    } catch (error) {
-      localStorage.removeItem('token');
-      setToken(null);
-    } finally {
+      const userData = response.data;
+      setUser(userData);
+      // Update stored user data
+      localStorage.setItem('user', JSON.stringify(userData));
+      setLoading(false);
+    } catch (error: any) {
+      // Only clear token if it's an auth error (401/422), not network errors
+      const status = error?.response?.status;
+      if (status === 401 || status === 422) {
+        // Token is invalid, clear everything
+        console.error('Token validation failed:', error);
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setToken(null);
+        setUser(null);
+        delete api.defaults.headers.common['Authorization'];
+      } else {
+        // Network error or other issue - keep the token and user
+        console.warn('Failed to fetch user, but keeping token:', error);
+      }
       setLoading(false);
     }
   };
 
   const login = async (email: string, password: string) => {
-    const response = await api.post('/auth/login', { email, password });
-    const { token: newToken, user: newUser } = response.data;
-    localStorage.setItem('token', newToken);
-    localStorage.setItem('user', JSON.stringify(newUser));
-    setToken(newToken);
-    setUser(newUser);
-    api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+    try {
+      const response = await api.post('/auth/login', { email, password });
+      const { token: newToken, user: newUser } = response.data;
+      
+      // Store token and user
+      localStorage.setItem('token', newToken);
+      localStorage.setItem('user', JSON.stringify(newUser));
+      
+      // Update state immediately
+      setToken(newToken);
+      setUser(newUser);
+      api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      
+      // Don't call fetchUser() here - we already have the user data from login
+      // The useEffect won't run again because we're not changing dependencies
+    } catch (error: any) {
+      // Clear any existing token if login fails
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      setToken(null);
+      setUser(null);
+      delete api.defaults.headers.common['Authorization'];
+      throw error; // Re-throw so Login component can handle it
+    }
   };
 
   const register = async (
@@ -63,19 +114,35 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     lastName: string,
     role: 'teacher' | 'student'
   ) => {
-    const response = await api.post('/auth/register', {
-      email,
-      password,
-      firstName,
-      lastName,
-      role,
-    });
-    const { token: newToken, user: newUser } = response.data;
-    localStorage.setItem('token', newToken);
-    localStorage.setItem('user', JSON.stringify(newUser));
-    setToken(newToken);
-    setUser(newUser);
-    api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+    try {
+      const response = await api.post('/auth/register', {
+        email,
+        password,
+        firstName,
+        lastName,
+        role,
+      });
+      const { token: newToken, user: newUser } = response.data;
+      
+      // Store token and user
+      localStorage.setItem('token', newToken);
+      localStorage.setItem('user', JSON.stringify(newUser));
+      
+      // Update state immediately
+      setToken(newToken);
+      setUser(newUser);
+      api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+      
+      // Don't call fetchUser() here - we already have the user data from register
+    } catch (error: any) {
+      // Clear any existing token if register fails
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      setToken(null);
+      setUser(null);
+      delete api.defaults.headers.common['Authorization'];
+      throw error; // Re-throw so Register component can handle it
+    }
   };
 
   const logout = () => {
