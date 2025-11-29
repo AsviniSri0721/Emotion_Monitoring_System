@@ -41,14 +41,33 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const userData = JSON.parse(storedUser);
           setUser(userData);
           setLoading(false); // Set loading to false immediately if we have cached user
+          
+          // Validate token in background (don't block UI)
+          // Use a small delay to ensure token is properly set
+          // Don't clear token if validation fails - let the user stay logged in with cached data
+          setTimeout(() => {
+            fetchUser().catch(err => {
+              // Only log the error, don't clear token
+              // This prevents logout on network errors or temporary validation issues
+              const status = err?.response?.status;
+              if (status === 401 || status === 422) {
+                logger.warn('Background token validation failed - but keeping cached user data', {
+                  status,
+                  error: err?.response?.data?.error
+                });
+              } else {
+                logger.warn('Background token validation failed (network error?)', err);
+              }
+            });
+          }, 100);
         } catch (e) {
           console.error('Error parsing stored user:', e);
+          setLoading(false);
         }
+      } else {
+        // No cached user, must fetch from server
+        fetchUser();
       }
-      
-      // Verify token is still valid by fetching user from server (in background)
-      // Don't block UI if we have cached user data
-      fetchUser();
     } else {
       setLoading(false);
     }
@@ -57,6 +76,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const fetchUser = async () => {
     try {
       logger.info('Fetching user data from server');
+      
+      // Ensure token is in headers
+      const token = localStorage.getItem('token');
+      if (!token) {
+        logger.warn('No token found in localStorage');
+        setLoading(false);
+        return null;
+      }
+      
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
       const response = await api.get('/auth/me');
       const userData = response.data;
       setUser(userData);
@@ -64,12 +94,34 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       localStorage.setItem('user', JSON.stringify(userData));
       logger.info('User data fetched successfully', { userId: userData.id, role: userData.role });
       setLoading(false);
+      return userData;
     } catch (error: any) {
-      // Only clear token if it's an auth error (401/422), not network errors
       const status = error?.response?.status;
-      if (status === 401 || status === 422) {
-        // Token is invalid, clear everything
-        logger.error('Token validation failed', { status, error: error.message });
+      const errorMessage = error?.response?.data?.error || error?.message;
+      const errorDetails = error?.response?.data?.details;
+      
+      logger.error('Token validation failed', { 
+        status, 
+        error: errorMessage,
+        details: errorDetails,
+        url: error?.config?.url,
+        hasToken: !!localStorage.getItem('token')
+      });
+      
+      // Only clear token if it's a definitive auth error
+      // 401 = Unauthorized (token missing/invalid)
+      // 422 = Unprocessable Entity (could be token validation or other issues)
+      // But check the error message to be sure
+      const isTokenError = status === 401 || 
+                          (status === 422 && (
+                            errorMessage?.toLowerCase().includes('token') ||
+                            errorMessage?.toLowerCase().includes('invalid') ||
+                            errorDetails?.toLowerCase().includes('token')
+                          ));
+      
+      if (isTokenError) {
+        // Token is definitely invalid, clear everything
+        logger.error('Clearing invalid token', { errorMessage, errorDetails });
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         setToken(null);
@@ -77,9 +129,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         delete api.defaults.headers.common['Authorization'];
       } else {
         // Network error or other issue - keep the token and user
-        logger.warn('Failed to fetch user, but keeping token', { status, error: error.message });
+        // This prevents logout on network issues or temporary server problems
+        logger.warn('Failed to fetch user, but keeping token (may be temporary issue)', { 
+          status, 
+          error: errorMessage,
+          details: errorDetails
+        });
       }
       setLoading(false);
+      throw error; // Re-throw so caller can handle it
     }
   };
 
@@ -88,6 +146,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       logger.info('Attempting login', { email });
       const response = await api.post('/auth/login', { email, password });
       const { token: newToken, user: newUser } = response.data;
+      
+      if (!newToken || !newUser) {
+        throw new Error('Invalid response from server');
+      }
       
       // Store token and user
       localStorage.setItem('token', newToken);
@@ -100,8 +162,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       logger.info('Login successful', { userId: newUser.id, role: newUser.role });
       
+      // Set loading to false since we have user data
+      setLoading(false);
+      
       // Don't call fetchUser() here - we already have the user data from login
-      // The useEffect won't run again because we're not changing dependencies
+      // This prevents the immediate logout issue
     } catch (error: any) {
       logger.error('Login failed', { email, error: error.message, status: error?.response?.status });
       // Clear any existing token if login fails
@@ -110,6 +175,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setToken(null);
       setUser(null);
       delete api.defaults.headers.common['Authorization'];
+      setLoading(false);
       throw error; // Re-throw so Login component can handle it
     }
   };

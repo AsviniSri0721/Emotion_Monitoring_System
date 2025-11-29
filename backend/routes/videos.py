@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, send_from_directory
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from utils.jwt_helpers import get_current_user
 from werkzeug.utils import secure_filename
 import os
 import uuid
@@ -34,7 +35,7 @@ def upload_video():
         
         # Get user identity
         try:
-            current_user = get_jwt_identity()
+            current_user = get_current_user()
             logger.info(f"Current user: {current_user}")
             logger.info(f"User ID: {current_user.get('id')}")
             logger.info(f"User role: {current_user.get('role')}")
@@ -147,10 +148,16 @@ def upload_video():
         }), status_code
 
 @bp.route('/', methods=['GET'])
+@bp.route('', methods=['GET'])  # Handle both with and without trailing slash
 @jwt_required()
 def get_videos():
     try:
         current_user = get_jwt_identity()
+        logger.info(f"Token validated for videos: {current_user}")
+        
+        if not current_user or 'id' not in current_user or 'role' not in current_user:
+            logger.error(f"Invalid user data from token: {current_user}")
+            return jsonify({'error': 'Invalid token payload'}), 422
         
         if current_user['role'] == 'teacher':
             results = execute_query(

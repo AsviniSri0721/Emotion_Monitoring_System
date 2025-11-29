@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from utils.jwt_helpers import get_current_user
 from services.database import execute_query
 import logging
 import uuid
@@ -15,7 +16,7 @@ def generate_uuid_str():
 @jwt_required()
 def trigger_intervention():
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         data = request.get_json()
         
         intervention_id = generate_uuid_str()
@@ -38,7 +39,7 @@ def trigger_intervention():
 @jwt_required()
 def complete_intervention(intervention_id):
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         data = request.get_json()
         
         execute_query(

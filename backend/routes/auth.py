@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity, get_jwt
 from werkzeug.security import generate_password_hash, check_password_hash
 from services.database import execute_query
 import logging
@@ -46,11 +46,15 @@ def register():
         )
         
         # Create token
-        token = create_access_token(identity={
-            'id': user_id,
-            'email': email,
-            'role': role
-        })
+        # Flask-JWT-Extended requires identity to be a string
+        # Store additional user data in additional_claims
+        token = create_access_token(
+            identity=str(user_id),  # User ID as string
+            additional_claims={
+                'email': email,
+                'role': role
+            }
+        )
         
         return jsonify({
             'token': token,
@@ -70,26 +74,60 @@ def register():
 @bp.route('/login', methods=['POST'])
 def login():
     try:
+        logger.info("=" * 50)
+        logger.info("LOGIN REQUEST RECEIVED")
+        logger.info(f"Content-Type: {request.content_type}")
+        logger.info(f"Request method: {request.method}")
+        
         data = request.get_json()
+        if not data:
+            logger.error("No JSON data in request")
+            return jsonify({'error': 'No data provided'}), 400
+        
         email = data.get('email')
         password = data.get('password')
         
+        logger.info(f"Login attempt for email: {email}")
+        
+        if not email or not password:
+            logger.warning("Missing email or password")
+            return jsonify({'error': 'Email and password are required'}), 400
+        
         # Find user
+        logger.info(f"Querying database for user: {email}")
         user = execute_query(
             "SELECT id, email, password_hash, first_name, last_name, role FROM users WHERE email = %s",
             (email,),
             fetch_one=True
         )
         
-        if not user or not check_password_hash(user[2], password):
+        if not user:
+            logger.warning(f"User not found: {email}")
+            return jsonify({'error': 'Invalid credentials'}), 401
+        
+        logger.info(f"User found: {user[1]} (ID: {user[0]})")
+        
+        # Check password
+        password_valid = check_password_hash(user[2], password)
+        logger.info(f"Password check result: {password_valid}")
+        
+        if not password_valid:
+            logger.warning(f"Invalid password for user: {email}")
             return jsonify({'error': 'Invalid credentials'}), 401
         
         # Create token
-        token = create_access_token(identity={
-            'id': str(user[0]),
-            'email': user[1],
-            'role': user[5]
-        })
+        # Flask-JWT-Extended requires identity to be a string
+        # Store additional user data in additional_claims
+        token = create_access_token(
+            identity=str(user[0]),  # User ID as string
+            additional_claims={
+                'email': user[1],
+                'role': user[5]
+            }
+        )
+        
+        logger.info(f"Token created successfully for user: {user[1]} (Role: {user[5]})")
+        logger.info("=" * 50)
         
         return jsonify({
             'token': token,
@@ -103,21 +141,35 @@ def login():
         })
         
     except Exception as e:
-        logger.error(f"Login error: {str(e)}")
-        return jsonify({'error': 'Login failed'}), 500
+        logger.error(f"Login error: {str(e)}", exc_info=True)
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': 'Login failed', 'details': str(e)}), 500
 
 @bp.route('/me', methods=['GET'])
 @jwt_required()
 def get_current_user():
     try:
-        current_user = get_jwt_identity()
-        logger.info(f"Token validated for user: {current_user}")
+        logger.info("=" * 50)
+        logger.info("GET /api/auth/me REQUEST RECEIVED")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Authorization header present: {'Authorization' in request.headers}")
         
-        if not current_user or 'id' not in current_user:
+        auth_header = request.headers.get('Authorization', 'None')
+        if auth_header != 'None':
+            token_preview = auth_header[:50] + '...' if len(auth_header) > 50 else auth_header
+            logger.info(f"Token preview: {token_preview}")
+        
+        # Get user ID from identity (which is now a string)
+        user_id = get_jwt_identity()
+        # Get additional claims (email, role)
+        claims = get_jwt()
+        
+        logger.info(f"Token validated successfully for user ID: {user_id}")
+        
+        if not user_id:
             logger.error("Invalid token payload: missing user id")
-            return jsonify({'error': 'Invalid token payload'}), 422
-        
-        user_id = current_user['id']
+            return jsonify({'error': 'Invalid token payload', 'details': 'Missing user id in token'}), 422
         logger.info(f"Fetching user from database: {user_id}")
         
         user = execute_query(

@@ -18,9 +18,19 @@ api.interceptors.request.use(
     });
     
     // Add token from localStorage dynamically for each request
-    const token = localStorage.getItem('token');
+    // Also check api.defaults.headers in case it was set there
+    let token = localStorage.getItem('token');
+    if (!token) {
+      const authHeader = api.defaults.headers.common['Authorization'];
+      if (typeof authHeader === 'string') {
+        token = authHeader.replace('Bearer ', '');
+      }
+    }
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+      logger.debug(`Token added to request: ${token.substring(0, 20)}...`);
+    } else {
+      logger.warn(`No token found for request: ${config.url}`);
     }
     
     // Don't set Content-Type for FormData - let browser set it with boundary
@@ -55,15 +65,25 @@ api.interceptors.response.use(
     
     logger.error('API Error', errorInfo);
     
-    // If token is invalid (401/422), clear it
+    // Only clear token for auth-related endpoints on 401/422
+    // Don't clear token for other endpoints (like /videos, /sessions) as they might fail for other reasons
+    const isAuthEndpoint = error.config?.url?.includes('/auth/');
+    
     if (error.response && (error.response.status === 401 || error.response.status === 422)) {
-      logger.warn('Authentication failed - clearing token');
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      delete api.defaults.headers.common['Authorization'];
-      // Redirect to login if not already there
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+      if (isAuthEndpoint) {
+        // Only clear token if it's an auth endpoint (like /auth/me)
+        logger.warn('Authentication failed on auth endpoint - clearing token');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        delete api.defaults.headers.common['Authorization'];
+        // Redirect to login if not already there
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+      } else {
+        // For other endpoints, just log the error but don't clear token
+        // The component can handle the error
+        logger.warn(`API call failed but keeping token: ${error.config?.url}`);
       }
     }
     return Promise.reject(error);

@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from utils.jwt_helpers import get_current_user
 import cv2
 import numpy as np
 import base64
@@ -22,7 +23,7 @@ def detect_emotions():
     Expected: base64 encoded image or image file
     """
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         user_id = current_user['id']
         
         # Get model service from app context
@@ -105,7 +106,7 @@ def detect_emotions():
 def record_emotion():
     """Record emotion data (for batch processing or manual entry)"""
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         user_id = current_user['id']
         
         data = request.get_json()
@@ -138,7 +139,7 @@ def record_emotion():
 def get_emotion_timeline(session_type, session_id):
     """Get emotion timeline for a session"""
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         user_id = current_user['id']
         user_role = current_user['role']
         

@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
+from utils.jwt_helpers import get_current_user
 from services.database import execute_query
 import logging
 from datetime import datetime
@@ -15,6 +16,8 @@ def generate_uuid_str():
 @bp.route('/live', methods=['GET', 'POST'])
 @jwt_required()
 def live_sessions():
+    # The @jwt_required() decorator validates the token before this function runs
+    # So get_jwt_identity() should work here
     if request.method == 'GET':
         return get_live_sessions()
     else:
@@ -23,7 +26,12 @@ def live_sessions():
 def get_live_sessions():
     """GET endpoint to fetch all live sessions"""
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
+        logger.info(f"Token validated for user: {current_user}")
+        
+        if not current_user['id'] or not current_user['role']:
+            logger.error(f"Invalid user data from token: {current_user}")
+            return jsonify({'error': 'Invalid token payload'}), 422
         
         # Teachers see their own sessions, students see all available sessions
         if current_user['role'] == 'teacher':
@@ -73,7 +81,7 @@ def get_live_sessions():
 
 def create_live_session():
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         if current_user['role'] != 'teacher':
             return jsonify({'error': 'Unauthorized'}), 403
         
@@ -106,7 +114,7 @@ def create_live_session():
 @jwt_required()
 def join_live_session(session_id):
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         
         # Check if already joined
         existing = execute_query(
@@ -134,7 +142,7 @@ def join_live_session(session_id):
 @jwt_required()
 def join_recorded_session(video_id):
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         
         existing = execute_query(
             """SELECT id FROM session_participants 
@@ -161,7 +169,7 @@ def join_recorded_session(video_id):
 @jwt_required()
 def leave_session(session_type, session_id):
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         
         # MySQL compatible query
         execute_query(
@@ -183,7 +191,7 @@ def leave_session(session_type, session_id):
 def start_live_session(session_id):
     """Start a live session (change status to 'live')"""
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         if current_user['role'] != 'teacher':
             return jsonify({'error': 'Unauthorized'}), 403
         
@@ -206,7 +214,7 @@ def start_live_session(session_id):
 def end_live_session(session_id):
     """End a live session (change status to 'ended')"""
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         if current_user['role'] != 'teacher':
             return jsonify({'error': 'Unauthorized'}), 403
         

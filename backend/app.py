@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager
+from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 import os
 from dotenv import load_dotenv
 import logging
@@ -31,10 +31,11 @@ jwt = JWTManager(app)
 CORS(app, 
      resources={r"/api/*": {
          "origins": ["http://localhost:3000", "http://127.0.0.1:3000"],
-         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-         "allow_headers": ["Content-Type", "Authorization"],
-         "expose_headers": ["Content-Type"],
-         "supports_credentials": True
+         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+         "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+         "expose_headers": ["Content-Type", "Authorization"],
+         "supports_credentials": True,
+         "max_age": 3600
      }},
      supports_credentials=True,
      automatic_options=True)
@@ -68,14 +69,21 @@ else:
 def log_request():
     """Log all incoming requests"""
     if request.path.startswith('/api/'):
-        api_logger.info(f"{request.method} {request.path} - IP: {request.remote_addr}")
+        # Log Authorization header presence (but not the token itself)
+        auth_header = request.headers.get('Authorization', 'None')
+        has_token = 'Bearer' in auth_header if auth_header != 'None' else False
+        api_logger.info(f"{request.method} {request.path} - IP: {request.remote_addr} - Token: {'Present' if has_token else 'Missing'}")
+        
         if request.method in ['POST', 'PUT', 'PATCH']:
             # Log request data (but not passwords)
-            if request.is_json:
-                data = request.get_json() or {}
-                # Don't log password fields
-                safe_data = {k: '***' if 'password' in k.lower() else v for k, v in data.items()}
-                api_logger.debug(f"Request data: {safe_data}")
+            try:
+                if request.is_json:
+                    data = request.get_json() or {}
+                    # Don't log password fields
+                    safe_data = {k: '***' if 'password' in k.lower() else v for k, v in data.items()}
+                    api_logger.debug(f"Request data: {safe_data}")
+            except:
+                pass  # Ignore errors in logging
 
 @app.after_request
 def log_response(response):
@@ -113,11 +121,49 @@ def expired_token_callback(jwt_header, jwt_payload):
 
 @jwt.invalid_token_loader
 def invalid_token_callback(error):
-    return jsonify({'error': 'Invalid token', 'details': str(error)}), 422
+    error_str = str(error)
+    logger.error(f"Invalid token error: {error_str}")
+    auth_logger.error(f"Invalid token error: {error_str}")
+    # Log request details for debugging
+    auth_logger.error(f"Request path: {request.path}")
+    auth_logger.error(f"Request method: {request.method}")
+    auth_header = request.headers.get('Authorization', 'None')
+    has_bearer = 'Bearer' in auth_header if auth_header != 'None' else False
+    auth_logger.error(f"Authorization header present: {has_bearer}")
+    if has_bearer:
+        token_preview = auth_header[:50] + '...' if len(auth_header) > 50 else auth_header
+        auth_logger.error(f"Token preview: {token_preview}")
+        # Try to decode manually to see the exact error
+        try:
+            token = auth_header.replace('Bearer ', '').strip()
+            from flask_jwt_extended import decode_token
+            decoded = decode_token(token)
+            auth_logger.error(f"Token decoded successfully: {decoded}")
+        except Exception as decode_err:
+            auth_logger.error(f"Manual decode failed: {str(decode_err)}")
+            auth_logger.error(f"Decode error type: {type(decode_err).__name__}")
+            import traceback
+            auth_logger.error(f"Decode traceback: {traceback.format_exc()}")
+    # Also log JWT_SECRET status (but not the actual secret)
+    jwt_secret = os.getenv('JWT_SECRET', 'NOT SET')
+    auth_logger.error(f"JWT_SECRET is set: {bool(jwt_secret and jwt_secret != 'NOT SET')}")
+    auth_logger.error(f"JWT_SECRET length: {len(jwt_secret) if jwt_secret != 'NOT SET' else 0}")
+    return jsonify({
+        'error': 'Invalid token', 
+        'details': error_str,
+        'path': request.path,
+        'method': request.method
+    }), 422
 
 @jwt.unauthorized_loader
 def missing_token_callback(error):
-    return jsonify({'error': 'Authorization token is missing'}), 401
+    logger.error(f"Missing token error: {str(error)}")
+    auth_logger.error(f"Missing token: {str(error)}")
+    auth_logger.error(f"Request path: {request.path}")
+    auth_logger.error(f"Request method: {request.method}")
+    auth_header = request.headers.get('Authorization', 'None')
+    auth_logger.error(f"Authorization header: {auth_header[:50] if auth_header != 'None' and len(auth_header) > 50 else auth_header}")
+    return jsonify({'error': 'Authorization token is missing', 'details': str(error)}), 401
 
 # Error handlers
 @app.errorhandler(413)
@@ -135,6 +181,59 @@ def health_check():
         'message': 'Emotion Monitoring System API',
         'models_loaded': app.model_service.models_loaded if app.model_service else False
     })
+
+@app.route('/api/test-token', methods=['GET'])
+@jwt_required()
+def test_token():
+    """Test endpoint to verify token validation"""
+    try:
+        current_user = get_jwt_identity()
+        logger.info(f"Test token endpoint - Token validated successfully: {current_user}")
+        return jsonify({
+            'status': 'success',
+            'message': 'Token is valid',
+            'user': current_user
+        })
+    except Exception as e:
+        logger.error(f"Token test failed: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({
+            'status': 'error',
+            'message': 'Token validation failed',
+            'error': str(e)
+        }), 422
+
+@app.route('/api/debug-token', methods=['GET'])
+def debug_token():
+    """Debug endpoint to check token without validation (for troubleshooting)"""
+    auth_header = request.headers.get('Authorization', 'None')
+    has_bearer = 'Bearer' in auth_header if auth_header != 'None' else False
+    
+    token_info = {
+        'has_authorization_header': auth_header != 'None',
+        'has_bearer': has_bearer,
+        'header_length': len(auth_header) if auth_header != 'None' else 0,
+        'token_preview': auth_header[:50] + '...' if has_bearer and len(auth_header) > 50 else auth_header,
+        'jwt_secret_set': bool(os.getenv('JWT_SECRET')),
+        'jwt_secret_length': len(os.getenv('JWT_SECRET', '')) if os.getenv('JWT_SECRET') else 0,
+        'jwt_secret_preview': os.getenv('JWT_SECRET', '')[:20] + '...' if os.getenv('JWT_SECRET') else 'NOT SET'
+    }
+    
+    # Try to decode the token manually to see what error we get
+    if has_bearer:
+        try:
+            token = auth_header.replace('Bearer ', '').strip()
+            from flask_jwt_extended import decode_token
+            decoded = decode_token(token)
+            token_info['decoded_successfully'] = True
+            token_info['decoded_identity'] = decoded.get('sub', 'N/A')
+        except Exception as decode_error:
+            token_info['decoded_successfully'] = False
+            token_info['decode_error'] = str(decode_error)
+            token_info['decode_error_type'] = type(decode_error).__name__
+    
+    return jsonify(token_info)
 
 @app.route('/api/models/status', methods=['GET'])
 def model_status():

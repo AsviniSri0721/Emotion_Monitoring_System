@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from utils.jwt_helpers import get_current_user
 from services.database import execute_query
 import logging
 import json
@@ -17,7 +18,13 @@ def generate_uuid_str():
 def get_all_reports():
     """GET endpoint to fetch all engagement reports for the dashboard"""
     try:
-        current_user = get_jwt_identity()
+        # get_jwt_identity() should work here because @jwt_required() already validated the token
+        current_user = get_current_user()
+        logger.info(f"Token validated for reports: {current_user}")
+        
+        if not current_user or 'id' not in current_user or 'role' not in current_user:
+            logger.error(f"Invalid user data from token: {current_user}")
+            return jsonify({'error': 'Invalid token payload'}), 422
         
         # Teachers see reports for all their sessions, students see their own reports
         if current_user['role'] == 'teacher':
@@ -99,7 +106,7 @@ def get_all_reports():
 @jwt_required()
 def generate_report(session_type, session_id):
     try:
-        current_user = get_jwt_identity()
+        current_user = get_current_user()
         data = request.get_json()
         student_id = data.get('studentId', current_user['id'])
         
