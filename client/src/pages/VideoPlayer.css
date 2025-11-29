@@ -1,0 +1,218 @@
+.video-player-container {
+  min-height: 100vh;
+  background-color: #f5f5f5;
+  padding: 2rem;
+}
+
+.video-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.video-header h1 {
+  margin: 0;
+  color: #333;
+}
+
+.video-content {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 2rem;
+}
+
+.video-section {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.video-wrapper {
+  position: relative;
+  width: 100%;
+  padding-bottom: 56.25%; /* 16:9 aspect ratio */
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.video-wrapper video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.video-controls {
+  display: flex;
+  gap: 1rem;
+}
+
+.emotion-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.emotion-controls {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.emotion-controls h3 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.webcam-container {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  justify-content: center;
+}
+
+.emotion-display {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.emotion-card {
+  text-align: center;
+}
+
+.emotion-card h4 {
+  margin: 0 0 1rem 0;
+  color: #666;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.emotion-value {
+  font-size: 2rem;
+  font-weight: 600;
+  color: #007bff;
+  margin: 0.5rem 0;
+  text-transform: capitalize;
+}
+
+.confidence,
+.engagement {
+  margin: 0.5rem 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.emotion-history {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.emotion-history h4 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.emotion-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.emotion-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.emotion-label {
+  text-transform: capitalize;
+  font-weight: 500;
+}
+
+.emotion-time {
+  color: #999;
+  font-size: 0.9rem;
+}
+
+.intervention-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 2rem;
+}
+
+.intervention-content {
+  background: white;
+  border-radius: 10px;
+  padding: 3rem;
+  max-width: 600px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  text-align: center;
+}
+
+.intervention-content h2 {
+  color: #333;
+  margin-bottom: 1rem;
+}
+
+.intervention-content > p {
+  color: #666;
+  margin-bottom: 2rem;
+}
+
+.intervention-activity {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 2rem;
+  margin: 2rem 0;
+  text-align: left;
+}
+
+.intervention-activity h3 {
+  color: #333;
+  margin-bottom: 1rem;
+}
+
+.intervention-activity p {
+  color: #666;
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.intervention-activity .answer {
+  color: #007bff;
+  font-weight: 500;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #ddd;
+}
+
+.intervention-activity ol {
+  margin-left: 1.5rem;
+  color: #666;
+  line-height: 1.8;
+}
+
+@media (max-width: 768px) {
+  .video-content {
+    grid-template-columns: 1fr;
+  }
+}
+

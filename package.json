@@ -1,0 +1,19 @@
+{
+  "name": "emotion-monitoring-system",
+  "version": "1.0.0",
+  "description": "E-learning system with real-time emotion monitoring and adaptive interventions",
+  "scripts": {
+    "client": "cd client && npm start",
+    "build": "cd client && npm run build",
+    "install-client": "cd client && npm install"
+  },
+  "keywords": [
+    "e-learning",
+    "emotion-detection",
+    "education",
+    "moodle"
+  ],
+  "author": "",
+  "license": "MIT"
+}
+

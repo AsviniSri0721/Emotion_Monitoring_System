@@ -1,0 +1,4 @@
+# Place your trained models here:
+# - emotion_cnn_model.pkl (CNN emotion classification model)
+# - yolov8_face.pt (YOLOv8 face detection model, optional)
+

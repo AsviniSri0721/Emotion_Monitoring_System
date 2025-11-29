@@ -1,0 +1,148 @@
+.live-session-container {
+  min-height: 100vh;
+  background-color: #f5f5f5;
+  padding: 2rem;
+}
+
+.live-session-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.live-session-header h1 {
+  margin: 0;
+  color: #333;
+}
+
+.live-session-content {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 2rem;
+}
+
+.meet-section {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.meet-container {
+  width: 100%;
+}
+
+.meet-placeholder {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 600px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  color: #666;
+}
+
+.emotion-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.emotion-controls {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.emotion-controls h3 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.webcam-container {
+  background: white;
+  border-radius: 8px;
+  padding: 1rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  justify-content: center;
+}
+
+.emotion-display {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.emotion-card {
+  text-align: center;
+}
+
+.emotion-card h4 {
+  margin: 0 0 1rem 0;
+  color: #666;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.emotion-value {
+  font-size: 2rem;
+  font-weight: 600;
+  color: #007bff;
+  margin: 0.5rem 0;
+  text-transform: capitalize;
+}
+
+.confidence,
+.engagement {
+  margin: 0.5rem 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+.emotion-history {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.emotion-history h4 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.emotion-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.emotion-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.emotion-label {
+  text-transform: capitalize;
+  font-weight: 500;
+}
+
+.emotion-time {
+  color: #999;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 768px) {
+  .live-session-content {
+    grid-template-columns: 1fr;
+  }
+}
+
