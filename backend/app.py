@@ -4,9 +4,11 @@ from flask_jwt_extended import JWTManager
 import os
 from dotenv import load_dotenv
 import logging
+from datetime import datetime
 
 from routes import auth, videos, sessions, emotions, reports, interventions
 from services.database import init_db
+from config_logging import setup_logging
 
 # Import model service only if available (optional for testing without models)
 try:
@@ -37,9 +39,10 @@ CORS(app,
      supports_credentials=True,
      automatic_options=True)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Setup comprehensive logging
+logger = setup_logging(app)
+api_logger = logging.getLogger('api')
+auth_logger = logging.getLogger('auth')
 
 # Initialize database
 init_db()
@@ -59,6 +62,34 @@ else:
     logger.warning("ModelService not available - running without ML models")
     logger.info("Backend will work for authentication and basic features")
     app.model_service = None
+
+# Request logging middleware
+@app.before_request
+def log_request():
+    """Log all incoming requests"""
+    if request.path.startswith('/api/'):
+        api_logger.info(f"{request.method} {request.path} - IP: {request.remote_addr}")
+        if request.method in ['POST', 'PUT', 'PATCH']:
+            # Log request data (but not passwords)
+            if request.is_json:
+                data = request.get_json() or {}
+                # Don't log password fields
+                safe_data = {k: '***' if 'password' in k.lower() else v for k, v in data.items()}
+                api_logger.debug(f"Request data: {safe_data}")
+
+@app.after_request
+def log_response(response):
+    """Log all responses"""
+    if request.path.startswith('/api/'):
+        api_logger.info(f"{request.method} {request.path} - Status: {response.status_code}")
+    return response
+
+# Error logging
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Log all exceptions"""
+    logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
+    return jsonify({'error': 'Internal server error', 'message': str(e)}), 500
 
 # Register blueprints
 app.register_blueprint(auth.bp, url_prefix='/api/auth')

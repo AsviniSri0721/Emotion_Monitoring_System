@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import api from '../services/api';
+import logger from '../utils/logger';
 
 interface User {
   id: string;
@@ -55,18 +56,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const fetchUser = async () => {
     try {
+      logger.info('Fetching user data from server');
       const response = await api.get('/auth/me');
       const userData = response.data;
       setUser(userData);
       // Update stored user data
       localStorage.setItem('user', JSON.stringify(userData));
+      logger.info('User data fetched successfully', { userId: userData.id, role: userData.role });
       setLoading(false);
     } catch (error: any) {
       // Only clear token if it's an auth error (401/422), not network errors
       const status = error?.response?.status;
       if (status === 401 || status === 422) {
         // Token is invalid, clear everything
-        console.error('Token validation failed:', error);
+        logger.error('Token validation failed', { status, error: error.message });
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         setToken(null);
@@ -74,7 +77,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         delete api.defaults.headers.common['Authorization'];
       } else {
         // Network error or other issue - keep the token and user
-        console.warn('Failed to fetch user, but keeping token:', error);
+        logger.warn('Failed to fetch user, but keeping token', { status, error: error.message });
       }
       setLoading(false);
     }
@@ -82,6 +85,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const login = async (email: string, password: string) => {
     try {
+      logger.info('Attempting login', { email });
       const response = await api.post('/auth/login', { email, password });
       const { token: newToken, user: newUser } = response.data;
       
@@ -94,9 +98,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setUser(newUser);
       api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
       
+      logger.info('Login successful', { userId: newUser.id, role: newUser.role });
+      
       // Don't call fetchUser() here - we already have the user data from login
       // The useEffect won't run again because we're not changing dependencies
     } catch (error: any) {
+      logger.error('Login failed', { email, error: error.message, status: error?.response?.status });
       // Clear any existing token if login fails
       localStorage.removeItem('token');
       localStorage.removeItem('user');

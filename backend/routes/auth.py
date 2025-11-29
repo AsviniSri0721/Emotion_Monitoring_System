@@ -6,7 +6,7 @@ import logging
 import uuid
 
 bp = Blueprint('auth', __name__)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('auth')  # Use auth logger
 
 def generate_uuid_str():
     """Generate UUID string for database"""

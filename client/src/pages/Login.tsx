@@ -7,7 +7,7 @@ const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const { login, user, token, loading } = useAuth();
   const navigate = useNavigate();
 
@@ -22,7 +22,7 @@ const Login: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    setLoading(true);
+    setIsSubmitting(true);
 
     try {
       await login(email, password);
@@ -31,7 +31,7 @@ const Login: React.FC = () => {
     } catch (err: any) {
       setError(err.response?.data?.error || 'Login failed');
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -60,8 +60,8 @@ const Login: React.FC = () => {
               required
             />
           </div>
-          <button type="submit" className="btn btn-primary" disabled={loading}>
-            {loading ? 'Logging in...' : 'Login'}
+          <button type="submit" className="btn btn-primary" disabled={isSubmitting || loading}>
+            {isSubmitting ? 'Logging in...' : 'Login'}
           </button>
         </form>
         <p className="auth-link">
