@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import EngagementMeter from '../components/EngagementMeter';
 import { useAuth } from '../contexts/AuthContext';
+import { useEmotionStream } from '../hooks/useEmotionStream';
 import api from '../services/api';
-import { emotionDetector, EmotionResult } from '../services/emotionDetection';
 import './VideoPlayer.css';
 
 const VideoPlayer: React.FC = () => {
@@ -13,40 +14,46 @@ const VideoPlayer: React.FC = () => {
   const webcamRef = useRef<HTMLVideoElement>(null);
   const [video, setVideo] = useState<any>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [emotion, setEmotion] = useState<EmotionResult | null>(null);
-  const [emotionHistory, setEmotionHistory] = useState<Array<EmotionResult & { timestamp: number }>>([]);
   const [showIntervention, setShowIntervention] = useState(false);
-  const [interventionType, setInterventionType] = useState<'mind_game' | 'music_therapy' | 'micro_learning' | null>(null);
   const [interventionStartTime, setInterventionStartTime] = useState<number | null>(null);
-  const sessionStartTime = useRef<number>(Date.now());
-  const lastEmotionSendTime = useRef<number>(0);
+  const [interventionId, setInterventionId] = useState<string | null>(null);
+  const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
+
+  // Use the new emotion stream hook
+  const {
+    emotionResult,
+    isDetecting,
+    error: emotionError,
+    shouldTriggerIntervention,
+    consecutiveLowScores,
+    startDetection,
+    stopDetection,
+  } = useEmotionStream({
+    videoElement: webcamRef.current,
+    sessionType: 'recorded',
+    sessionId: id || '',
+    interval: 2000,
+    enabled: emotionDetectionEnabled && !!id,
+  });
 
   useEffect(() => {
     fetchVideo();
     joinSession();
 
     return () => {
-      emotionDetector.stopDetection();
+      stopDetection();
       leaveSession();
     };
-  }, [id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, stopDetection]);
 
+  // Trigger intervention when concentration is low for 10 consecutive frames
   useEffect(() => {
-    if (emotion && videoRef.current) {
-      const timestamp = Math.floor((Date.now() - sessionStartTime.current) / 1000);
-      const videoTime = Math.floor(videoRef.current.currentTime);
-
-      // Send emotion data to server every 5 seconds
-      if (timestamp - lastEmotionSendTime.current >= 5) {
-        sendEmotionData(emotion, videoTime);
-        lastEmotionSendTime.current = timestamp;
-      }
-
-      // Check for disengagement (only for recorded sessions)
-      checkDisengagement(emotion);
+    if (shouldTriggerIntervention && !showIntervention) {
+      triggerIntervention('low_concentration');
     }
-  }, [emotion]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldTriggerIntervention, showIntervention]);
 
   const fetchVideo = async () => {
     try {
@@ -68,40 +75,29 @@ const VideoPlayer: React.FC = () => {
   const leaveSession = async () => {
     try {
       await api.post(`/sessions/recorded/${id}/leave`);
-      // Generate report
-      await api.post(`/reports/generate/recorded/${id}`, { studentId: user?.id });
     } catch (error) {
       console.error('Error leaving session:', error);
-    }
-  };
-
-  // Emotion data is now sent automatically by the detector
-  const sendEmotionData = async (emotionData: EmotionResult, timestamp: number) => {
-    // Data is sent automatically by emotionDetector
-    // This function kept for compatibility but no longer needed
-  };
-
-  const checkDisengagement = (emotionData: EmotionResult) => {
-    const disengagedEmotions = ['bored', 'confused', 'sleepy'];
-    if (disengagedEmotions.includes(emotionData.emotion) && emotionData.confidence > 0.6) {
-      triggerIntervention(emotionData.emotion);
     }
   };
 
   const triggerIntervention = async (triggeredEmotion: string) => {
     if (showIntervention) return; // Already showing intervention
 
-    const types: Array<'mind_game' | 'music_therapy' | 'micro_learning'> = ['mind_game', 'music_therapy', 'micro_learning'];
-    const randomType = types[Math.floor(Math.random() * types.length)];
-
     try {
-      await api.post('/interventions/trigger', {
+      const response = await api.post('/interventions/trigger', {
         sessionId: id,
-        interventionType: randomType,
+        interventionType: 'mind_game', // Default type for recorded sessions
         triggeredEmotion,
+        concentrationScore: emotionResult?.concentrationScore || 0,
       });
 
-      setInterventionType(randomType);
+      // Store the intervention ID from the response
+      const interventionIdFromResponse = response.data?.intervention?.id;
+      if (interventionIdFromResponse) {
+        setInterventionId(interventionIdFromResponse);
+        console.log('[VideoPlayer] Intervention triggered with ID:', interventionIdFromResponse);
+      }
+
       setShowIntervention(true);
       setInterventionStartTime(Date.now());
       
@@ -116,56 +112,58 @@ const VideoPlayer: React.FC = () => {
   };
 
   const completeIntervention = async () => {
-    if (!interventionType || !interventionStartTime) return;
+    if (!interventionStartTime) return;
 
     const duration = Math.floor((Date.now() - interventionStartTime) / 1000);
     
-    try {
-      // Get intervention ID from the last trigger
-      const interventions = await api.get(`/interventions/session/${id}`);
-      const lastIntervention = interventions.data.interventions[0];
-      
-      if (lastIntervention) {
-        await api.post(`/interventions/${lastIntervention.id}/complete`, { duration });
-      }
-
+    // Always resume video and close intervention, even if API call fails
+    const resumeVideo = () => {
       setShowIntervention(false);
-      setInterventionType(null);
       setInterventionStartTime(null);
+      setInterventionId(null);
 
       // Resume video
       if (videoRef.current) {
         videoRef.current.play();
         setIsPlaying(true);
       }
-    } catch (error) {
-      console.error('Error completing intervention:', error);
+    };
+
+    // Try to complete intervention in backend if we have an ID
+    if (interventionId) {
+      try {
+        console.log('[VideoPlayer] Completing intervention:', interventionId, 'Duration:', duration);
+        await api.post(`/interventions/${interventionId}/complete`, { duration });
+        console.log('[VideoPlayer] Intervention completed successfully');
+      } catch (error) {
+        console.error('[VideoPlayer] Error completing intervention:', error);
+        // Continue anyway - resume video even if completion fails
+      }
+    } else {
+      console.warn('[VideoPlayer] No intervention ID stored, skipping completion API call');
     }
+
+    // Always resume video regardless of API call success/failure
+    resumeVideo();
   };
 
   const startEmotionDetection = async () => {
-    if (!webcamRef.current || !id) return;
-
-    try {
-      await emotionDetector.startDetection(
-        webcamRef.current,
-        (result) => {
-          setEmotion(result);
-          const timestamp = Math.floor((Date.now() - sessionStartTime.current) / 1000);
-          setEmotionHistory((prev) => [...prev.slice(-19), { ...result, timestamp }]);
-        },
-        'recorded',
-        id
-      );
-    } catch (error) {
-      console.error('Error starting emotion detection:', error);
-      alert('Could not access webcam. Please allow camera permissions.');
+    if (!webcamRef.current || !id) {
+      console.log('[VideoPlayer] Cannot start emotion detection:', { 
+        hasWebcam: !!webcamRef.current, 
+        hasId: !!id 
+      });
+      return;
     }
+    console.log('[VideoPlayer] Starting emotion detection...');
+    setEmotionDetectionEnabled(true);
+    await startDetection();
   };
 
   const stopEmotionDetection = () => {
-    emotionDetector.stopDetection();
-    setEmotion(null);
+    console.log('[VideoPlayer] Stopping emotion detection...');
+    setEmotionDetectionEnabled(false);
+    stopDetection();
   };
 
   const handlePlayPause = () => {
@@ -179,11 +177,7 @@ const VideoPlayer: React.FC = () => {
     }
   };
 
-  const handleTimeUpdate = () => {
-    if (videoRef.current) {
-      setCurrentTime(videoRef.current.currentTime);
-    }
-  };
+  // Time update handler removed as currentTime is not used
 
   if (!video) {
     return <div className="loading">Loading video...</div>;
@@ -193,39 +187,25 @@ const VideoPlayer: React.FC = () => {
     return (
       <div className="intervention-container">
         <div className="intervention-content">
-          <h2>Take a Break!</h2>
-          <p>We noticed you might be feeling {emotion?.emotion}. Let's take a short break to re-energize.</p>
-          
-          {interventionType === 'mind_game' && (
-            <div className="intervention-activity">
-              <h3>Mind Game</h3>
-              <p>Try to solve this: What comes next? 2, 4, 8, 16, ?</p>
-              <p className="answer">Answer: 32 (each number is doubled)</p>
-            </div>
+          <h2>Low Concentration Detected</h2>
+          <p>You lack of concentration so watch and come again</p>
+          {emotionResult && (
+            <p>Current concentration: {Math.round(emotionResult.concentrationScore)}%</p>
           )}
           
-          {interventionType === 'music_therapy' && (
-            <div className="intervention-activity">
-              <h3>Music Therapy</h3>
-              <p>Take a moment to breathe deeply and relax. Close your eyes and focus on your breathing.</p>
-              <p>Inhale for 4 counts, hold for 4, exhale for 4.</p>
-            </div>
-          )}
+          <div className="intervention-activity">
+            <a
+              href="https://www.youtube.com/watch?v=p7GmO8ewjmw&list=RDp7GmO8ewjmw&start_radio=1"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-primary"
+              style={{ marginBottom: '1rem', display: 'inline-block' }}
+            >
+              Watch on YouTube
+            </a>
+          </div>
           
-          {interventionType === 'micro_learning' && (
-            <div className="intervention-activity">
-              <h3>Quick Learning Tip</h3>
-              <p>When learning, try the Feynman Technique:</p>
-              <ol>
-                <li>Choose a concept you want to understand</li>
-                <li>Explain it in simple terms</li>
-                <li>Identify gaps in your understanding</li>
-                <li>Review and simplify further</li>
-              </ol>
-            </div>
-          )}
-          
-          <button className="btn btn-primary" onClick={completeIntervention}>
+          <button className="btn btn-secondary" onClick={completeIntervention}>
             Continue Learning
           </button>
         </div>
@@ -248,7 +228,6 @@ const VideoPlayer: React.FC = () => {
             <video
               ref={videoRef}
               src={`${process.env.REACT_APP_API_URL?.replace('/api', '') || 'http://localhost:5000'}/uploads/${video.file_path}`}
-              onTimeUpdate={handleTimeUpdate}
               onPlay={() => setIsPlaying(true)}
               onPause={() => setIsPlaying(false)}
               controls
@@ -264,7 +243,7 @@ const VideoPlayer: React.FC = () => {
         <div className="emotion-section">
           <div className="emotion-controls">
             <h3>Emotion Monitoring</h3>
-            {!emotion ? (
+            {!isDetecting ? (
               <button className="btn btn-primary" onClick={startEmotionDetection}>
                 Start Monitoring
               </button>
@@ -287,28 +266,25 @@ const VideoPlayer: React.FC = () => {
             </div>
           )}
 
-          {emotion && (
+          {emotionResult && (
             <div className="emotion-display">
-              <div className="emotion-card">
-                <h4>Current Emotion</h4>
-                <p className="emotion-value">{emotion.emotion}</p>
-                <p className="confidence">Confidence: {(emotion.confidence * 100).toFixed(1)}%</p>
-                <p className="engagement">Engagement: {(emotion.engagementScore * 100).toFixed(1)}%</p>
+              <EngagementMeter
+                score={emotionResult.concentrationScore}
+                emotion={emotionResult.emotion}
+                size={150}
+              />
+              <div className="emotion-details">
+                <p className="confidence">Confidence: {(emotionResult.confidence * 100).toFixed(1)}%</p>
+                {consecutiveLowScores > 0 && (
+                  <p className="warning">Low concentration: {consecutiveLowScores} consecutive frames</p>
+                )}
               </div>
             </div>
           )}
 
-          {emotionHistory.length > 0 && (
-            <div className="emotion-history">
-              <h4>Recent Emotions</h4>
-              <div className="emotion-timeline">
-                {emotionHistory.slice(-10).map((item, index) => (
-                  <div key={index} className="emotion-item">
-                    <span className="emotion-label">{item.emotion}</span>
-                    <span className="emotion-time">{item.timestamp}s</span>
-                  </div>
-                ))}
-              </div>
+          {emotionError && (
+            <div className="error-message">
+              <p>{emotionError}</p>
             </div>
           )}
         </div>

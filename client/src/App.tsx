@@ -1,13 +1,14 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { Navigate, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import './App.css';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import LiveSession from './pages/LiveSession';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import TeacherDashboard from './pages/TeacherDashboard';
+import ReportPage from './pages/ReportPage';
 import StudentDashboard from './pages/StudentDashboard';
+import TeacherDashboard from './pages/TeacherDashboard';
 import VideoPlayer from './pages/VideoPlayer';
-import LiveSession from './pages/LiveSession';
-import './App.css';
 
 const PrivateRoute: React.FC<{ children: React.ReactNode; allowedRoles: ('teacher' | 'student')[] }> = ({ 
   children, 
@@ -33,7 +34,8 @@ const PrivateRoute: React.FC<{ children: React.ReactNode; allowedRoles: ('teache
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
       try {
-        const userData = JSON.parse(storedUser);
+        // Validate that stored user data is valid JSON
+        JSON.parse(storedUser);
         // If we have cached user data, use it temporarily while waiting for server validation
         // But still show loading to indicate we're verifying
         return <div className="loading">Loading...</div>;
@@ -111,6 +113,15 @@ function App() {
             element={
               <PrivateRoute allowedRoles={['student', 'teacher']}>
                 <LiveSession />
+              </PrivateRoute>
+            }
+          />
+          
+          <Route
+            path="/report/:sessionType/:sessionId"
+            element={
+              <PrivateRoute allowedRoles={['student', 'teacher']}>
+                <ReportPage />
               </PrivateRoute>
             }
           />

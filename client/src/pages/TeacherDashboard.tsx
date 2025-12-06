@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
@@ -25,9 +25,13 @@ interface Report {
   id: string;
   student_name: string;
   session_title: string;
+  session_type: string;
+  session_id: string;
   overall_engagement: number;
   average_emotion: string;
   engagement_drops: number;
+  focus_percentage?: number;
+  concentration_drops?: number;
   generated_at: string;
 }
 
@@ -91,7 +95,6 @@ const TeacherDashboard: React.FC = () => {
     }
 
     // Validate file type
-    const allowedTypes = ['video/mp4', 'video/webm', 'video/ogg', 'video/avi', 'video/quicktime', 'video/x-msvideo'];
     const allowedExtensions = ['mp4', 'webm', 'ogg', 'avi', 'mov'];
     const fileExtension = uploadForm.file.name.split('.').pop()?.toLowerCase();
     
@@ -275,9 +278,11 @@ const TeacherDashboard: React.FC = () => {
                     <th>Student</th>
                     <th>Session</th>
                     <th>Engagement</th>
+                    <th>Concentration</th>
                     <th>Emotion</th>
                     <th>Drops</th>
                     <th>Date</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -286,9 +291,24 @@ const TeacherDashboard: React.FC = () => {
                       <td>{report.student_name}</td>
                       <td>{report.session_title}</td>
                       <td>{(report.overall_engagement * 100).toFixed(1)}%</td>
+                      <td>
+                        {report.focus_percentage !== undefined
+                          ? `${report.focus_percentage.toFixed(1)}%`
+                          : 'N/A'}
+                      </td>
                       <td>{report.average_emotion}</td>
                       <td>{report.engagement_drops}</td>
                       <td>{new Date(report.generated_at).toLocaleDateString()}</td>
+                      <td>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          onClick={() =>
+                            navigate(`/report/${report.session_type}/${report.session_id}`)
+                          }
+                        >
+                          View Details
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

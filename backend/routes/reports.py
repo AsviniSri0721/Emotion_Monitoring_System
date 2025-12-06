@@ -107,8 +107,10 @@ def get_all_reports():
 def generate_report(session_type, session_id):
     try:
         current_user = get_current_user()
-        data = request.get_json()
+        data = request.get_json() or {}
         student_id = data.get('studentId', current_user['id'])
+        
+        logger.info(f"Generating report for session_type={session_type}, session_id={session_id}, student_id={student_id}")
         
         # Get emotion data
         results = execute_query(
@@ -120,12 +122,25 @@ def generate_report(session_type, session_id):
             fetch_all=True
         )
         
+        logger.info(f"Found {len(results) if results else 0} emotion data records")
+        
         if not results:
-            return jsonify({'error': 'No emotion data found'}), 404
+            logger.warning(f"No emotion data found for session_type={session_type}, session_id={session_id}, student_id={student_id}")
+            return jsonify({
+                'error': 'No emotion data found',
+                'message': 'No emotion data has been recorded for this session. Please watch the video with emotion monitoring enabled first.',
+                'session_type': session_type,
+                'session_id': session_id,
+                'student_id': student_id
+            }), 404
         
         # Calculate statistics
         emotions = [row[0] for row in results]
         engagement_scores = [row[3] for row in results if row[3]]
+        timestamps = [row[2] for row in results]
+        
+        # Convert engagement_score (0-1) to concentration_score (0-100) for display
+        concentration_scores = [score * 100.0 if score else 50.0 for score in engagement_scores]
         
         emotion_counts = {}
         for emotion in emotions:
@@ -133,6 +148,7 @@ def generate_report(session_type, session_id):
         
         total = len(emotions)
         overall_engagement = sum(engagement_scores) / len(engagement_scores) if engagement_scores else 0.5
+        avg_concentration = sum(concentration_scores) / len(concentration_scores) if concentration_scores else 50.0
         
         # Calculate percentages
         focus_pct = (emotion_counts.get('focused', 0) / total) * 100
@@ -140,13 +156,31 @@ def generate_report(session_type, session_id):
         confusion_pct = (emotion_counts.get('confused', 0) / total) * 100
         sleepiness_pct = (emotion_counts.get('sleepy', 0) / total) * 100
         
-        # Count engagement drops
+        # Count engagement drops (concentration < 40 for consecutive frames)
         drops = 0
+        concentration_drops = 0
         prev_eng = 1.0
-        for eng in engagement_scores:
+        prev_conc = 100.0
+        consecutive_low = 0
+        
+        for i, eng in enumerate(engagement_scores):
+            conc = concentration_scores[i] if i < len(concentration_scores) else 50.0
+            
+            # Traditional engagement drop (0.5 threshold)
             if eng < 0.5 and prev_eng >= 0.5:
                 drops += 1
+            
+            # Concentration drop (40% threshold)
+            if conc < 40:
+                consecutive_low += 1
+                if consecutive_low >= 10:
+                    concentration_drops += 1
+                    consecutive_low = 0  # Reset after counting a drop
+            else:
+                consecutive_low = 0
+            
             prev_eng = eng
+            prev_conc = conc
         
         average_emotion = max(emotion_counts.items(), key=lambda x: x[1])[0] if emotion_counts else 'neutral'
         
@@ -160,8 +194,17 @@ def generate_report(session_type, session_id):
         
         report_id = existing[0] if existing else generate_uuid_str()
         
-        timeline_json = json.dumps([{'emotion': r[0], 'timestamp': r[2]} for r in results])
-        behavior_summary = f"Engagement: {overall_engagement:.2%}, Drops: {drops}"
+        # Create timeline with concentration data
+        timeline_data = []
+        for i, r in enumerate(results):
+            timeline_data.append({
+                'emotion': r[0],
+                'timestamp': r[2],
+                'concentration': concentration_scores[i] if i < len(concentration_scores) else 50.0,
+                'engagement_score': float(r[3]) if r[3] else 0.5
+            })
+        timeline_json = json.dumps(timeline_data)
+        behavior_summary = f"Engagement: {overall_engagement:.2%}, Concentration: {avg_concentration:.1f}%, Drops: {drops}, Concentration Drops: {concentration_drops}"
         
         if existing:
             # Update existing report
@@ -196,8 +239,15 @@ def generate_report(session_type, session_id):
             'report': {
                 'id': str(report_id),
                 'overall_engagement': float(overall_engagement),
+                'average_concentration': float(avg_concentration),
                 'average_emotion': average_emotion,
-                'engagement_drops': drops
+                'engagement_drops': drops,
+                'concentration_drops': concentration_drops,
+                'focus_percentage': float(focus_pct),
+                'boredom_percentage': float(boredom_pct),
+                'confusion_percentage': float(confusion_pct),
+                'sleepiness_percentage': float(sleepiness_pct),
+                'timeline': timeline_data
             }
         }), 201
         

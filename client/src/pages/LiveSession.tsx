@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import EngagementMeter from '../components/EngagementMeter';
 import { useAuth } from '../contexts/AuthContext';
+import { useEmotionStream } from '../hooks/useEmotionStream';
 import api from '../services/api';
-import { emotionDetector, EmotionResult } from '../services/emotionDetection';
 import './LiveSession.css';
 
 const LiveSession: React.FC = () => {
@@ -11,32 +12,34 @@ const LiveSession: React.FC = () => {
   const { user } = useAuth();
   const webcamRef = useRef<HTMLVideoElement>(null);
   const [session, setSession] = useState<any>(null);
-  const [emotion, setEmotion] = useState<EmotionResult | null>(null);
-  const [emotionHistory, setEmotionHistory] = useState<Array<EmotionResult & { timestamp: number }>>([]);
-  const sessionStartTime = useRef<number>(Date.now());
-  const lastEmotionSendTime = useRef<number>(0);
+  const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
+
+  // Use the new emotion stream hook
+  const {
+    emotionResult,
+    isDetecting,
+    error: emotionError,
+    consecutiveLowScores,
+    startDetection,
+    stopDetection,
+  } = useEmotionStream({
+    videoElement: webcamRef.current,
+    sessionType: 'live',
+    sessionId: id || '',
+    interval: 2000,
+    enabled: emotionDetectionEnabled && !!id,
+  });
 
   useEffect(() => {
     fetchSession();
     joinSession();
 
     return () => {
-      emotionDetector.stopDetection();
+      stopDetection();
       leaveSession();
     };
-  }, [id]);
-
-  useEffect(() => {
-    if (emotion) {
-      const timestamp = Math.floor((Date.now() - sessionStartTime.current) / 1000);
-
-      // Send emotion data to server every 5 seconds
-      if (timestamp - lastEmotionSendTime.current >= 5) {
-        sendEmotionData(emotion, timestamp);
-        lastEmotionSendTime.current = timestamp;
-      }
-    }
-  }, [emotion]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, stopDetection]);
 
   const fetchSession = async () => {
     try {
@@ -67,35 +70,15 @@ const LiveSession: React.FC = () => {
     }
   };
 
-  // Emotion data is now sent automatically by the detector
-  const sendEmotionData = async (emotionData: EmotionResult, timestamp: number) => {
-    // Data is sent automatically by emotionDetector
-    // This function kept for compatibility but no longer needed
-  };
-
   const startEmotionDetection = async () => {
     if (!webcamRef.current || !id) return;
-
-    try {
-      await emotionDetector.startDetection(
-        webcamRef.current,
-        (result) => {
-          setEmotion(result);
-          const timestamp = Math.floor((Date.now() - sessionStartTime.current) / 1000);
-          setEmotionHistory((prev) => [...prev.slice(-19), { ...result, timestamp }]);
-        },
-        'live',
-        id
-      );
-    } catch (error) {
-      console.error('Error starting emotion detection:', error);
-      alert('Could not access webcam. Please allow camera permissions.');
-    }
+    setEmotionDetectionEnabled(true);
+    await startDetection();
   };
 
   const stopEmotionDetection = () => {
-    emotionDetector.stopDetection();
-    setEmotion(null);
+    setEmotionDetectionEnabled(false);
+    stopDetection();
   };
 
   if (!session) {
@@ -137,7 +120,7 @@ const LiveSession: React.FC = () => {
         <div className="emotion-section">
           <div className="emotion-controls">
             <h3>Emotion Monitoring</h3>
-            {!emotion ? (
+            {!isDetecting ? (
               <button className="btn btn-primary" onClick={startEmotionDetection}>
                 Start Monitoring
               </button>
@@ -160,28 +143,25 @@ const LiveSession: React.FC = () => {
             </div>
           )}
 
-          {emotion && (
+          {emotionResult && (
             <div className="emotion-display">
-              <div className="emotion-card">
-                <h4>Current Emotion</h4>
-                <p className="emotion-value">{emotion.emotion}</p>
-                <p className="confidence">Confidence: {(emotion.confidence * 100).toFixed(1)}%</p>
-                <p className="engagement">Engagement: {(emotion.engagementScore * 100).toFixed(1)}%</p>
+              <EngagementMeter
+                score={emotionResult.concentrationScore}
+                emotion={emotionResult.emotion}
+                size={150}
+              />
+              <div className="emotion-details">
+                <p className="confidence">Confidence: {(emotionResult.confidence * 100).toFixed(1)}%</p>
+                {consecutiveLowScores > 0 && (
+                  <p className="warning">Low concentration: {consecutiveLowScores} consecutive frames</p>
+                )}
               </div>
             </div>
           )}
 
-          {emotionHistory.length > 0 && (
-            <div className="emotion-history">
-              <h4>Recent Emotions</h4>
-              <div className="emotion-timeline">
-                {emotionHistory.slice(-10).map((item, index) => (
-                  <div key={index} className="emotion-item">
-                    <span className="emotion-label">{item.emotion}</span>
-                    <span className="emotion-time">{item.timestamp}s</span>
-                  </div>
-                ))}
-              </div>
+          {emotionError && (
+            <div className="error-message">
+              <p>{emotionError}</p>
             </div>
           )}
         </div>

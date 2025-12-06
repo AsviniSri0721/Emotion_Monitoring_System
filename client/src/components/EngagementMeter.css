@@ -1,0 +1,35 @@
+.engagement-meter {
+  position: relative;
+  display: inline-block;
+}
+
+.engagement-meter-svg {
+  transform: rotate(-90deg);
+}
+
+.engagement-meter-progress {
+  transition: stroke-dashoffset 0.3s ease, stroke 0.3s ease;
+}
+
+.engagement-meter-content {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+.engagement-meter-score {
+  font-size: 1.5rem;
+  font-weight: bold;
+  line-height: 1.2;
+  margin-bottom: 0.25rem;
+}
+
+.engagement-meter-emotion {
+  font-size: 0.75rem;
+  color: #666;
+  text-transform: capitalize;
+}
+
