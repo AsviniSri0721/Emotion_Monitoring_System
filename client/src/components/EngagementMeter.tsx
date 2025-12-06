@@ -12,6 +12,8 @@ const EngagementMeter: React.FC<EngagementMeterProps> = ({
   emotion,
   size = 120,
 }) => {
+  // Log when component renders to verify updates
+  console.log('[EngagementMeter] Rendering with:', { score, emotion, timestamp: Date.now() });
   // Determine color based on score
   const getColor = (score: number): string => {
     if (score >= 70) return '#4caf50'; // Green - high concentration

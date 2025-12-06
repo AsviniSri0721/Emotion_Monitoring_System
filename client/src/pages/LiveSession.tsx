@@ -11,6 +11,8 @@ const LiveSession: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const webcamRef = useRef<HTMLVideoElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const [session, setSession] = useState<any>(null);
   const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
 
@@ -26,7 +28,7 @@ const LiveSession: React.FC = () => {
     videoElement: webcamRef.current,
     sessionType: 'live',
     sessionId: id || '',
-    interval: 2000,
+    interval: 1000, // 1 second for more real-time updates
     enabled: emotionDetectionEnabled && !!id,
   });
 
@@ -40,6 +42,65 @@ const LiveSession: React.FC = () => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, stopDetection]);
+
+  // Draw bounding box on webcam video
+  useEffect(() => {
+    if (!overlayCanvasRef.current || !webcamRef.current || !emotionResult?.bbox) {
+      // Clear canvas if no bbox
+      if (overlayCanvasRef.current) {
+        const ctx = overlayCanvasRef.current.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, overlayCanvasRef.current.width, overlayCanvasRef.current.height);
+        }
+      }
+      return;
+    }
+
+    const canvas = overlayCanvasRef.current;
+    const video = webcamRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Match canvas size to video display size
+    const rect = video.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+
+    // Get video actual dimensions for scaling
+    const videoWidth = video.videoWidth || 640;
+    const videoHeight = video.videoHeight || 480;
+    const scaleX = canvas.width / videoWidth;
+    const scaleY = canvas.height / videoHeight;
+
+    // Clear previous drawing
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Scale bounding box coordinates
+    const [x1, y1, x2, y2] = emotionResult.bbox;
+    const scaledX1 = x1 * scaleX;
+    const scaledY1 = y1 * scaleY;
+    const scaledX2 = x2 * scaleX;
+    const scaledY2 = y2 * scaleY;
+
+    // Draw bounding box
+    ctx.strokeStyle = '#00ff00'; // Green color
+    ctx.lineWidth = 3;
+    ctx.strokeRect(scaledX1, scaledY1, scaledX2 - scaledX1, scaledY2 - scaledY1);
+
+    // Draw label background
+    const labelText = `${emotionResult.emotion} (${(emotionResult.confidence * 100).toFixed(1)}%)`;
+    ctx.font = '14px Arial';
+    const textMetrics = ctx.measureText(labelText);
+    const labelWidth = textMetrics.width + 8;
+    const labelHeight = 20;
+    
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.fillRect(scaledX1, scaledY1 - labelHeight - 2, labelWidth, labelHeight);
+
+    // Draw label text
+    ctx.fillStyle = '#00ff00';
+    ctx.fillText(labelText, scaledX1 + 4, scaledY1 - 6);
+  }, [emotionResult]);
 
   const fetchSession = async () => {
     try {
@@ -132,13 +193,25 @@ const LiveSession: React.FC = () => {
           </div>
 
           {webcamRef && (
-            <div className="webcam-container">
+            <div className="webcam-container" style={{ position: 'relative' }}>
               <video
                 ref={webcamRef}
                 autoPlay
                 muted
                 playsInline
                 style={{ width: '100%', maxWidth: '320px', borderRadius: '8px' }}
+              />
+              <canvas
+                ref={overlayCanvasRef}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  maxWidth: '320px',
+                  pointerEvents: 'none',
+                  borderRadius: '8px',
+                }}
               />
             </div>
           )}
@@ -156,6 +229,36 @@ const LiveSession: React.FC = () => {
                   <p className="warning">Low concentration: {consecutiveLowScores} consecutive frames</p>
                 )}
               </div>
+              
+              {emotionResult.allEmotions && (
+                <div className="all-emotions-display" style={{ marginTop: '1rem', padding: '1rem', background: '#f9f9f9', borderRadius: '8px' }}>
+                  <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: '#666' }}>All Emotions:</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem', fontSize: '0.85rem' }}>
+                    {Object.entries(emotionResult.allEmotions)
+                      .sort(([, a], [, b]) => b - a) // Sort by probability descending
+                      .map(([emotion, probability]) => (
+                        <div 
+                          key={emotion} 
+                          style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between',
+                            padding: '0.25rem 0.5rem',
+                            background: emotion === emotionResult.emotion ? '#e3f2fd' : 'white',
+                            borderRadius: '4px',
+                            border: emotion === emotionResult.emotion ? '1px solid #2196f3' : '1px solid #e0e0e0'
+                          }}
+                        >
+                          <span style={{ textTransform: 'capitalize', fontWeight: emotion === emotionResult.emotion ? 'bold' : 'normal' }}>
+                            {emotion}:
+                          </span>
+                          <span style={{ color: '#666', fontWeight: 'bold' }}>
+                            {(probability * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

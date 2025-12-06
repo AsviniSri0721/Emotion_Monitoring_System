@@ -57,22 +57,38 @@ def detect_emotions():
         session_id = data.get('sessionId')
         timestamp = data.get('timestamp', 0)
         
-        # Detect emotions
-        detections = model_service.detect_emotions_in_image(image)
+        # Detect faces
+        faces = model_service.detect_faces(image)
         
-        if not detections:
+        if not faces:
             return jsonify({
                 'emotions': [],
                 'message': 'No faces detected'
             })
         
-        # Use first detected face (assuming single student)
-        detection = detections[0]
-        dominant_emotion = detection['dominant_emotion']
-        confidence = detection['confidence']
-        engagement_score = detection['engagement_score']
-        concentration_score = detection.get('concentration_score', 0.0)
-        emotion_state = detection.get('emotion_state', model_service.map_emotion_to_state(dominant_emotion))
+        # Use first detected face
+        face = faces[0]
+        box = face['bbox']
+        
+        # Preprocess face
+        face_tensor, preprocess_error = model_service.preprocess_face(image, box)
+        if face_tensor is None or preprocess_error is not None:
+            return jsonify({
+                'emotion': 'neutral',
+                'confidence': 0.0,
+                'concentration_score': 50.0,
+                'message': 'Face preprocessing failed',
+                'bbox': box
+            })
+        
+        # Predict emotions
+        emotion_probs = model_service.predict_emotion_vector(face_tensor)
+        emotion_label = max(emotion_probs, key=emotion_probs.get)
+        concentration = model_service.compute_concentration(emotion_probs)
+        
+        confidence = emotion_probs[emotion_label]
+        emotion_state = model_service.map_emotion_to_state(emotion_label)
+        engagement_score = concentration / 100.0  # Convert to 0-1 range for database
         
         # Store emotion data in database
         if session_id:
@@ -91,12 +107,10 @@ def detect_emotions():
         
         return jsonify({
             'emotion': emotion_state,
-            'dominant_emotion': dominant_emotion,
             'confidence': float(confidence),
-            'engagement_score': float(engagement_score),
-            'concentration_score': float(concentration_score),
-            'all_emotions': detection['emotions'],
-            'bbox': detection['bbox']
+            'concentration': float(concentration),
+            'probs': emotion_probs,
+            'bbox': box
         })
         
     except Exception as e:
@@ -164,27 +178,53 @@ def stream_emotions():
         if not session_id:
             return jsonify({'error': 'sessionId is required'}), 400
         
-        # Detect emotions
-        logger.info(f"[EmotionStream] Starting emotion detection for session {session_id}")
-        detections = model_service.detect_emotions_in_image(image)
-        logger.info(f"[EmotionStream] Emotion detection completed. Found {len(detections)} detection(s)")
+        # Calculate image hash to verify uniqueness
+        import hashlib
+        image_hash = hashlib.md5(image.tobytes()).hexdigest()[:16]
         
-        if not detections:
+        # Detect faces
+        faces = model_service.detect_faces(image)
+        logger.info(f"[EmotionStream] Face detection completed. Found {len(faces)} face(s)")
+        
+        if not faces:
             logger.warning(f"[EmotionStream] No faces detected in image. Returning default values.")
             return jsonify({
                 'emotion': 'neutral',
                 'confidence': 0.0,
                 'concentration_score': 50.0,
                 'timestamp': timestamp,
-                'message': 'No faces detected'
+                'message': 'No faces detected',
+                'bbox': None
             })
         
-        # Use first detected face (assuming single student)
-        detection = detections[0]
-        dominant_emotion = detection['dominant_emotion']
-        confidence = detection['confidence']
-        concentration_score = detection.get('concentration_score', 50.0)
-        emotion_state = detection.get('emotion_state', model_service.map_emotion_to_state(dominant_emotion))
+        # Use first detected face
+        face = faces[0]
+        box = face['bbox']
+        
+        # Preprocess face
+        face_tensor, preprocess_error = model_service.preprocess_face(image, box)
+        if face_tensor is None or preprocess_error is not None:
+            logger.warning(f"[EmotionStream] Face preprocessing failed: {preprocess_error}")
+            return jsonify({
+                'emotion': 'neutral',
+                'confidence': 0.0,
+                'concentration_score': 50.0,
+                'timestamp': timestamp,
+                'message': 'Face preprocessing failed',
+                'bbox': box
+            })
+        
+        # Predict emotions
+        emotion_probs = model_service.predict_emotion_vector(face_tensor)
+        emotion_label = max(emotion_probs, key=emotion_probs.get)
+        concentration = model_service.compute_concentration(emotion_probs)
+        
+        confidence = emotion_probs[emotion_label]
+        emotion_state = model_service.map_emotion_to_state(emotion_label)
+        
+        # Log detailed detection info
+        logger.info(f"[EmotionStream] Detection result - emotion: {emotion_label}, state: {emotion_state}, confidence: {confidence:.4f}, concentration: {concentration:.2f}")
+        logger.info(f"[EmotionStream] Returning bbox: {box}, all emotions: {emotion_probs}")
         
         # Always store emotion data in database for stream endpoint
         try:
@@ -193,7 +233,7 @@ def stream_emotions():
                 """INSERT INTO emotion_data 
                    (id, session_type, session_id, student_id, emotion, confidence, timestamp, engagement_score)
                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                (emotion_id, session_type, session_id, user_id, emotion_state, confidence, timestamp, concentration_score / 100.0)
+                (emotion_id, session_type, session_id, user_id, emotion_state, confidence, timestamp, concentration / 100.0)
             )
         except Exception as e:
             logger.error(f"Error storing emotion data: {str(e)}")
@@ -201,11 +241,11 @@ def stream_emotions():
         
         return jsonify({
             'emotion': emotion_state,
-            'dominant_emotion': dominant_emotion,
             'confidence': float(confidence),
-            'concentration_score': float(concentration_score),
-            'timestamp': timestamp,
-            'all_emotions': detection['emotions']
+            'concentration': float(concentration),
+            'probs': emotion_probs,
+            'bbox': box,
+            'timestamp': timestamp
         })
         
     except Exception as e:
@@ -245,6 +285,37 @@ def record_emotion():
         
     except Exception as e:
         logger.error(f"Error recording emotion: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@bp.route("/test_model", methods=["GET"])
+@jwt_required()
+def test_model():
+    """Test endpoint to validate model inference"""
+    try:
+        model_service = current_app.model_service
+        if not model_service:
+            return jsonify({'error': 'ML models not loaded'}), 503
+        
+        # Create random test image
+        sample = np.random.rand(224, 224, 3).astype(np.uint8) * 255
+        box = [0, 0, 224, 224]
+        
+        # Preprocess face
+        face_tensor, _ = model_service.preprocess_face(sample, box)
+        if face_tensor is None:
+            return jsonify({"error": "preprocess failed"}), 500
+        
+        # Predict emotions
+        probs = model_service.predict_emotion_vector(face_tensor)
+        
+        return jsonify({
+            "probs": probs,
+            "message": "Model test successful"
+        })
+    except Exception as e:
+        logger.error(f"Error in model test: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
 @bp.route('/<session_type>/<session_id>', methods=['GET'])

@@ -76,20 +76,20 @@ if MODEL_SERVICE_AVAILABLE and ModelService:
     try:
         model_service = ModelService()
         model_service.load_models()
-        app.model_service = model_service
+        setattr(app, 'model_service', model_service)
         logger.info("ML models initialized successfully")
     except Exception as e:
         logger.error(f"Failed to load ML models: {str(e)}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
         logger.warning("Running without ML models - emotion detection will not work")
-        app.model_service = None
+        setattr(app, 'model_service', None)
 else:
     logger.warning("ModelService not available - running without ML models")
     if not MODEL_SERVICE_AVAILABLE:
         logger.error("ModelService import failed - check if all dependencies are installed")
     logger.info("Backend will work for authentication and basic features")
-    app.model_service = None
+    setattr(app, 'model_service', None)
 
 # Request logging middleware
 @app.before_request
@@ -203,10 +203,11 @@ def bad_request(error):
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
+    model_service = getattr(app, 'model_service', None)
     return jsonify({
         'status': 'ok',
         'message': 'Emotion Monitoring System API',
-        'models_loaded': app.model_service.models_loaded if app.model_service else False
+        'models_loaded': model_service.models_loaded if model_service else False
     })
 
 @app.route('/api/test-token', methods=['GET'])
@@ -264,7 +265,8 @@ def debug_token():
 
 @app.route('/api/models/status', methods=['GET'])
 def model_status():
-    if not app.model_service:
+    model_service = getattr(app, 'model_service', None)
+    if not model_service:
         return jsonify({
             'models_loaded': False,
             'message': 'Models not available - running in test mode',
@@ -272,9 +274,9 @@ def model_status():
             'yolo_model_loaded': False
         })
     return jsonify({
-        'models_loaded': app.model_service.models_loaded,
-        'cnn_model_loaded': app.model_service.cnn_model is not None,
-        'yolo_model_loaded': app.model_service.yolo_model is not None
+        'models_loaded': model_service.models_loaded,
+        'cnn_model_loaded': model_service.cnn_model is not None,
+        'yolo_model_loaded': model_service.yolo_model is not None
     })
 
 if __name__ == '__main__':
