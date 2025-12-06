@@ -68,3 +68,10 @@ WHERE TABLE_SCHEMA = DATABASE()
   AND TABLE_NAME IN ('live_sessions', 'engagement_reports', 'session_participants')
 ORDER BY TABLE_NAME, ORDINAL_POSITION;
 
+
+
+
+
+
+
+

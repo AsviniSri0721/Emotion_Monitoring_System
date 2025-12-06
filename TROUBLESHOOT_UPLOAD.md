@@ -90,3 +90,10 @@ curl -X POST http://localhost:5000/api/videos/upload
 - Database `emotiondb` exists
 - `.env` file has correct database credentials
 
+
+
+
+
+
+
+

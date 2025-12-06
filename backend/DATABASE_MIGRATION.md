@@ -116,3 +116,10 @@ After running the migration, verify your database:
 - Always backup your database before running migrations in production
 - The Python migration script is the safest option as it checks before modifying
 
+
+
+
+
+
+
+

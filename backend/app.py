@@ -11,12 +11,35 @@ from services.database import init_db
 from config_logging import setup_logging
 
 # Import model service only if available (optional for testing without models)
+# Note: setup_logging hasn't been called yet, so we use print for errors
 try:
     from services.model_service import ModelService
     MODEL_SERVICE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     MODEL_SERVICE_AVAILABLE = False
     ModelService = None
+    # Log the actual import error - use print since logging not set up yet
+    import traceback
+    error_msg = f"ModelService import failed: {str(e)}"
+    tb = traceback.format_exc()
+    print(f"\n{'='*60}")
+    print("MODELSERVICE IMPORT ERROR:")
+    print(f"{'='*60}")
+    print(error_msg)
+    print(f"\nTraceback:\n{tb}")
+    print(f"{'='*60}\n")
+except Exception as e:
+    MODEL_SERVICE_AVAILABLE = False
+    ModelService = None
+    import traceback
+    error_msg = f"ModelService import error: {str(e)}"
+    tb = traceback.format_exc()
+    print(f"\n{'='*60}")
+    print("MODELSERVICE IMPORT ERROR:")
+    print(f"{'='*60}")
+    print(error_msg)
+    print(f"\nTraceback:\n{tb}")
+    print(f"{'='*60}\n")
 
 load_dotenv()
 
@@ -57,10 +80,14 @@ if MODEL_SERVICE_AVAILABLE and ModelService:
         logger.info("ML models initialized successfully")
     except Exception as e:
         logger.error(f"Failed to load ML models: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         logger.warning("Running without ML models - emotion detection will not work")
         app.model_service = None
 else:
     logger.warning("ModelService not available - running without ML models")
+    if not MODEL_SERVICE_AVAILABLE:
+        logger.error("ModelService import failed - check if all dependencies are installed")
     logger.info("Backend will work for authentication and basic features")
     app.model_service = None
 

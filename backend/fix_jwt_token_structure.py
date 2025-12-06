@@ -25,3 +25,10 @@ print("  claims = get_jwt()  # Returns dict with email, role")
 print("  current_user = {'id': user_id, 'role': claims.get('role'), 'email': claims.get('email')}")
 print()
 
+
+
+
+
+
+
+

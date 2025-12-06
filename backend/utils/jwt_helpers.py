@@ -17,3 +17,10 @@ def get_current_user():
         'email': claims.get('email')
     }
 
+
+
+
+
+
+
+

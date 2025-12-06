@@ -62,3 +62,10 @@ SELECT
 FROM information_schema.COLUMNS
 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'session_participants';
 
+
+
+
+
+
+
+

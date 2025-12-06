@@ -78,3 +78,10 @@ print("1. JWT_SECRET_KEY changed between token creation and validation")
 print("2. Token format issue when sent from frontend")
 print("3. Authorization header not being read correctly")
 
+
+
+
+
+
+
+
