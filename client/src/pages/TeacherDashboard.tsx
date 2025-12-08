@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { liveSessionsApi, LiveSession } from '../api/liveSessions';
 import api from '../services/api';
 import './Dashboard.css';
 
@@ -10,15 +11,6 @@ interface Video {
   description: string;
   file_path: string;
   created_at: string;
-}
-
-interface LiveSession {
-  id: string;
-  title: string;
-  description: string;
-  meet_url: string;
-  scheduled_at: string;
-  status: string;
 }
 
 interface Report {
@@ -64,8 +56,8 @@ const TeacherDashboard: React.FC = () => {
 
   const fetchSessions = async () => {
     try {
-      const response = await api.get('/sessions/live');
-      setSessions(response.data.sessions);
+      const response = await liveSessionsApi.getAvailable();
+      setSessions(response.sessions);
     } catch (error) {
       console.error('Error fetching sessions:', error);
     }
@@ -142,19 +134,23 @@ const TeacherDashboard: React.FC = () => {
 
   const handleCreateSession = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!sessionForm.title || !sessionForm.meetUrl) {
+      alert('Title and Meet URL are required');
+      return;
+    }
     try {
-      await api.post('/sessions/live', {
+      await liveSessionsApi.create({
         title: sessionForm.title,
-        description: sessionForm.description,
-        scheduledAt: sessionForm.scheduledAt,
         meetUrl: sessionForm.meetUrl,
+        startTime: sessionForm.scheduledAt || undefined,
       });
       setShowSessionModal(false);
       setSessionForm({ title: '', description: '', scheduledAt: '', meetUrl: '' });
       fetchSessions();
-    } catch (error) {
+      alert('Live session created successfully!');
+    } catch (error: any) {
       console.error('Error creating session:', error);
-      alert('Failed to create session');
+      alert(error?.response?.data?.error || 'Failed to create session');
     }
   };
 
@@ -242,7 +238,7 @@ const TeacherDashboard: React.FC = () => {
                   <h3>{session.title}</h3>
                   <p>{session.description || 'No description'}</p>
                   <p className="text-muted">
-                    Scheduled: {new Date(session.scheduled_at).toLocaleString()}
+                    Scheduled: {session.scheduled_at ? new Date(session.scheduled_at).toLocaleString() : 'Not scheduled'}
                   </p>
                   <p className="text-muted">Status: {session.status}</p>
                   {session.meet_url && (

@@ -57,6 +57,32 @@ def add_column_if_not_exists(table_name, column_name, column_definition):
         logger.error(f"Failed to add column {table_name}.{column_name}: {str(e)}")
         return False
 
+def check_table_exists(table_name):
+    """Check if a table exists"""
+    try:
+        conn = get_connection()
+        if not conn:
+            return False
+        
+        cursor = conn.cursor()
+        db_name = os.getenv('DB_NAME', 'emotiondb')
+        cursor.execute("""
+            SELECT COUNT(*) 
+            FROM information_schema.TABLES 
+            WHERE TABLE_SCHEMA = %s
+              AND TABLE_NAME = %s
+        """, (db_name, table_name))
+        
+        result = cursor.fetchone()
+        cursor.close()
+        return result[0] > 0 if result else False
+    except Exception as e:
+        logger.error(f"Error checking table {table_name}: {str(e)}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
 def verify_table_structure(table_name, required_columns):
     """Verify that a table has all required columns"""
     logger.info(f"\nChecking {table_name} table...")
@@ -128,6 +154,47 @@ def migrate_database():
         logger.info(f"\nAdding missing columns to session_participants...")
         if 'duration' in missing:
             add_column_if_not_exists('session_participants', 'duration', 'INTEGER')
+    
+    # Check and create live_session_logs table
+    logger.info("\nChecking live_session_logs table...")
+    if not check_table_exists('live_session_logs'):
+        logger.info("Creating live_session_logs table...")
+        try:
+            execute_query("""
+                CREATE TABLE live_session_logs (
+                    id VARCHAR(36) PRIMARY KEY,
+                    live_session_id VARCHAR(36) NOT NULL,
+                    student_id VARCHAR(36) NOT NULL,
+                    emotion VARCHAR(50) NOT NULL,
+                    confidence DECIMAL(5, 4) NOT NULL,
+                    engagement_score DECIMAL(5, 4),
+                    concentration_score DECIMAL(5, 2),
+                    timestamp INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (live_session_id) REFERENCES live_sessions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+                    INDEX idx_live_session_logs_session (live_session_id),
+                    INDEX idx_live_session_logs_student (student_id),
+                    INDEX idx_live_session_logs_timestamp (timestamp)
+                )
+            """)
+            logger.info("  ✓ live_session_logs table created")
+        except Exception as e:
+            logger.error(f"  Failed to create live_session_logs table: {str(e)}")
+    else:
+        logger.info("  ✓ live_session_logs table already exists")
+        # Verify columns
+        required_logs = [
+            'id', 'live_session_id', 'student_id', 'emotion', 'confidence',
+            'engagement_score', 'concentration_score', 'timestamp', 'created_at'
+        ]
+        missing = verify_table_structure('live_session_logs', required_logs)
+        if missing:
+            logger.info(f"Adding missing columns to live_session_logs...")
+            if 'engagement_score' in missing:
+                add_column_if_not_exists('live_session_logs', 'engagement_score', 'DECIMAL(5, 4)')
+            if 'concentration_score' in missing:
+                add_column_if_not_exists('live_session_logs', 'concentration_score', 'DECIMAL(5, 2)')
     
     # Ensure status enum has all values
     try:

@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import EngagementMeter from '../components/EngagementMeter';
 import { useAuth } from '../contexts/AuthContext';
-import { useEmotionStream } from '../hooks/useEmotionStream';
+import { useLiveSessionEmotionStream } from '../hooks/useLiveSessionEmotionStream';
+import { liveSessionsApi } from '../api/liveSessions';
 import api from '../services/api';
 import './LiveSession.css';
 
@@ -16,19 +17,17 @@ const LiveSession: React.FC = () => {
   const [session, setSession] = useState<any>(null);
   const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
 
-  // Use the new emotion stream hook
+  // Use live session emotion stream hook (NO interventions)
   const {
     emotionResult,
     isDetecting,
     error: emotionError,
-    consecutiveLowScores,
     startDetection,
     stopDetection,
-  } = useEmotionStream({
+  } = useLiveSessionEmotionStream({
     videoElement: webcamRef.current,
-    sessionType: 'live',
     sessionId: id || '',
-    interval: 1000, // 1 second for more real-time updates
+    interval: 5000, // 5 seconds for live sessions
     enabled: emotionDetectionEnabled && !!id,
   });
 
@@ -104,8 +103,8 @@ const LiveSession: React.FC = () => {
 
   const fetchSession = async () => {
     try {
-      const response = await api.get(`/sessions/live`);
-      const sessions = response.data.sessions;
+      const response = await liveSessionsApi.getAvailable();
+      const sessions = response.sessions;
       const currentSession = sessions.find((s: any) => s.id === id);
       setSession(currentSession);
     } catch (error) {
@@ -124,8 +123,8 @@ const LiveSession: React.FC = () => {
   const leaveSession = async () => {
     try {
       await api.post(`/sessions/live/${id}/leave`);
-      // Generate report
-      await api.post(`/reports/generate/live/${id}`, { studentId: user?.id });
+      // Note: Reports for live sessions are generated on-demand via /live-sessions/:id/report
+      // No need to pre-generate engagement_reports for live sessions
     } catch (error) {
       console.error('Error leaving session:', error);
     }
@@ -225,9 +224,7 @@ const LiveSession: React.FC = () => {
               />
               <div className="emotion-details">
                 <p className="confidence">Confidence: {(emotionResult.confidence * 100).toFixed(1)}%</p>
-                {consecutiveLowScores > 0 && (
-                  <p className="warning">Low concentration: {consecutiveLowScores} consecutive frames</p>
-                )}
+                <p className="timestamp">Time: {emotionResult.timestamp}s</p>
               </div>
               
               {emotionResult.allEmotions && (

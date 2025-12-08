@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { liveSessionsApi, LiveSession } from '../api/liveSessions';
 import api from '../services/api';
 import './Dashboard.css';
 
@@ -10,16 +11,6 @@ interface Video {
   description: string;
   teacher_name: string;
   created_at: string;
-}
-
-interface LiveSession {
-  id: string;
-  title: string;
-  description: string;
-  meet_url: string;
-  scheduled_at: string;
-  status: string;
-  teacher_name: string;
 }
 
 const StudentDashboard: React.FC = () => {
@@ -45,8 +36,8 @@ const StudentDashboard: React.FC = () => {
 
   const fetchSessions = async () => {
     try {
-      const response = await api.get('/sessions/live');
-      setSessions(response.data.sessions);
+      const response = await liveSessionsApi.getAvailable();
+      setSessions(response.sessions);
     } catch (error) {
       console.error('Error fetching sessions:', error);
     }
@@ -127,7 +118,7 @@ const StudentDashboard: React.FC = () => {
                   <p>{session.description || 'No description'}</p>
                   <p className="text-muted">Teacher: {session.teacher_name}</p>
                   <p className="text-muted">
-                    Scheduled: {new Date(session.scheduled_at).toLocaleString()}
+                    Scheduled: {session.scheduled_at ? new Date(session.scheduled_at).toLocaleString() : 'Not scheduled'}
                   </p>
                   <p className="text-muted">Status: {session.status}</p>
                   {(session.status === 'scheduled' || session.status === 'live') && (

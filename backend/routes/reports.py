@@ -112,15 +112,26 @@ def generate_report(session_type, session_id):
         
         logger.info(f"Generating report for session_type={session_type}, session_id={session_id}, student_id={student_id}")
         
-        # Get emotion data
-        results = execute_query(
-            """SELECT emotion, confidence, timestamp, engagement_score
-               FROM emotion_data
-               WHERE session_type = %s AND session_id = %s AND student_id = %s
-               ORDER BY timestamp ASC""",
-            (session_type, session_id, student_id),
-            fetch_all=True
-        )
+        # For live sessions, use live_session_logs table instead of emotion_data
+        if session_type == 'live':
+            results = execute_query(
+                """SELECT emotion, confidence, timestamp, engagement_score, concentration_score
+                   FROM live_session_logs
+                   WHERE live_session_id = %s AND student_id = %s
+                   ORDER BY timestamp ASC""",
+                (session_id, student_id),
+                fetch_all=True
+            )
+        else:
+            # For recorded sessions, use emotion_data table
+            results = execute_query(
+                """SELECT emotion, confidence, timestamp, engagement_score
+                   FROM emotion_data
+                   WHERE session_type = %s AND session_id = %s AND student_id = %s
+                   ORDER BY timestamp ASC""",
+                (session_type, session_id, student_id),
+                fetch_all=True
+            )
         
         logger.info(f"Found {len(results) if results else 0} emotion data records")
         
@@ -139,8 +150,14 @@ def generate_report(session_type, session_id):
         engagement_scores = [row[3] for row in results if row[3]]
         timestamps = [row[2] for row in results]
         
-        # Convert engagement_score (0-1) to concentration_score (0-100) for display
-        concentration_scores = [score * 100.0 if score else 50.0 for score in engagement_scores]
+        # For live sessions, concentration_score is already in the data (0-100)
+        # For recorded sessions, convert engagement_score (0-1) to concentration_score (0-100)
+        if session_type == 'live':
+            # Live sessions have concentration_score in column 4 (index 4)
+            concentration_scores = [float(row[4]) if len(row) > 4 and row[4] is not None else 50.0 for row in results]
+        else:
+            # Recorded sessions: convert engagement_score to concentration_score
+            concentration_scores = [score * 100.0 if score else 50.0 for score in engagement_scores]
         
         emotion_counts = {}
         for emotion in emotions:
@@ -156,31 +173,82 @@ def generate_report(session_type, session_id):
         confusion_pct = (emotion_counts.get('confused', 0) / total) * 100
         sleepiness_pct = (emotion_counts.get('sleepy', 0) / total) * 100
         
-        # Count engagement drops (concentration < 40 for consecutive frames)
+        # Count engagement drops and analyze concentration drops/recoveries
         drops = 0
         concentration_drops = 0
         prev_eng = 1.0
         prev_conc = 100.0
         consecutive_low = 0
         
+        # Concentration drop/recovery analysis
+        concentration_events = []  # List of {type: 'drop'|'recovery', timestamp: int, duration: int, start_time: int}
+        low_concentration_threshold = 40  # Below this is considered "low concentration"
+        high_concentration_threshold = 60  # Above this is considered "focused"
+        
+        in_low_concentration = False
+        low_concentration_start = None
+        low_concentration_start_timestamp = None
+        
         for i, eng in enumerate(engagement_scores):
             conc = concentration_scores[i] if i < len(concentration_scores) else 50.0
+            current_timestamp = timestamps[i] if i < len(timestamps) else 0
             
             # Traditional engagement drop (0.5 threshold)
             if eng < 0.5 and prev_eng >= 0.5:
                 drops += 1
             
-            # Concentration drop (40% threshold)
-            if conc < 40:
-                consecutive_low += 1
-                if consecutive_low >= 10:
-                    concentration_drops += 1
-                    consecutive_low = 0  # Reset after counting a drop
+            # Concentration drop/recovery tracking
+            if conc < low_concentration_threshold:
+                # Entering low concentration period
+                if not in_low_concentration:
+                    in_low_concentration = True
+                    low_concentration_start = i
+                    low_concentration_start_timestamp = current_timestamp
+                    consecutive_low = 1
+                else:
+                    consecutive_low += 1
+                    # Count as a drop if we've been low for 10+ consecutive readings
+                    if consecutive_low >= 10 and concentration_drops == 0:
+                        concentration_drops += 1
+            elif conc >= high_concentration_threshold:
+                # Recovered to focused state
+                if in_low_concentration:
+                    # Calculate duration of low concentration period
+                    duration_seconds = current_timestamp - low_concentration_start_timestamp if low_concentration_start_timestamp else 0
+                    concentration_events.append({
+                        'type': 'drop',
+                        'start_timestamp': low_concentration_start_timestamp,
+                        'end_timestamp': current_timestamp,
+                        'duration_seconds': duration_seconds,
+                        'start_concentration': concentration_scores[low_concentration_start] if low_concentration_start < len(concentration_scores) else 0,
+                        'recovery_concentration': conc
+                    })
+                    in_low_concentration = False
+                    low_concentration_start = None
+                    low_concentration_start_timestamp = None
+                    consecutive_low = 0
             else:
-                consecutive_low = 0
+                # In between thresholds - reset consecutive counter but keep tracking if we were low
+                if in_low_concentration:
+                    consecutive_low += 1
+                else:
+                    consecutive_low = 0
             
             prev_eng = eng
             prev_conc = conc
+        
+        # Handle case where session ends while in low concentration
+        if in_low_concentration and low_concentration_start_timestamp is not None:
+            last_timestamp = timestamps[-1] if timestamps else 0
+            duration_seconds = last_timestamp - low_concentration_start_timestamp
+            concentration_events.append({
+                'type': 'drop',
+                'start_timestamp': low_concentration_start_timestamp,
+                'end_timestamp': last_timestamp,
+                'duration_seconds': duration_seconds,
+                'start_concentration': concentration_scores[low_concentration_start] if low_concentration_start < len(concentration_scores) else 0,
+                'recovery_concentration': None  # Never recovered
+            })
         
         average_emotion = max(emotion_counts.items(), key=lambda x: x[1])[0] if emotion_counts else 'neutral'
         
@@ -197,14 +265,35 @@ def generate_report(session_type, session_id):
         # Create timeline with concentration data
         timeline_data = []
         for i, r in enumerate(results):
+            if session_type == 'live':
+                # Live sessions: concentration_score is in column 4
+                concentration = float(r[4]) if len(r) > 4 and r[4] is not None else 50.0
+            else:
+                # Recorded sessions: use calculated concentration
+                concentration = concentration_scores[i] if i < len(concentration_scores) else 50.0
+            
             timeline_data.append({
                 'emotion': r[0],
                 'timestamp': r[2],
-                'concentration': concentration_scores[i] if i < len(concentration_scores) else 50.0,
+                'concentration': concentration,
                 'engagement_score': float(r[3]) if r[3] else 0.5
             })
         timeline_json = json.dumps(timeline_data)
-        behavior_summary = f"Engagement: {overall_engagement:.2%}, Concentration: {avg_concentration:.1f}%, Drops: {drops}, Concentration Drops: {concentration_drops}"
+        
+        # Create concentration analysis summary
+        total_drop_duration = sum(event['duration_seconds'] for event in concentration_events)
+        avg_drop_duration = total_drop_duration / len(concentration_events) if concentration_events else 0
+        longest_drop = max(concentration_events, key=lambda x: x['duration_seconds']) if concentration_events else None
+        
+        concentration_analysis = {
+            'total_drops': len(concentration_events),
+            'total_drop_duration_seconds': total_drop_duration,
+            'average_drop_duration_seconds': avg_drop_duration,
+            'longest_drop': longest_drop,
+            'events': concentration_events
+        }
+        
+        behavior_summary = f"Engagement: {overall_engagement:.2%}, Concentration: {avg_concentration:.1f}%, Drops: {drops}, Concentration Drops: {concentration_drops}, Total Low Concentration Time: {total_drop_duration}s"
         
         if existing:
             # Update existing report
@@ -247,7 +336,8 @@ def generate_report(session_type, session_id):
                 'boredom_percentage': float(boredom_pct),
                 'confusion_percentage': float(confusion_pct),
                 'sleepiness_percentage': float(sleepiness_pct),
-                'timeline': timeline_data
+                'timeline': timeline_data,
+                'concentration_analysis': concentration_analysis
             }
         }), 201
         

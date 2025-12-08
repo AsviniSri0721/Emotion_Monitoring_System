@@ -14,8 +14,26 @@ import {
     YAxis,
 } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
+import { liveSessionsApi } from '../api/liveSessions';
 import api from '../services/api';
 import './ReportPage.css';
+
+interface ConcentrationEvent {
+  type: 'drop';
+  start_timestamp: number;
+  end_timestamp: number;
+  duration_seconds: number;
+  start_concentration: number;
+  recovery_concentration: number | null;
+}
+
+interface ConcentrationAnalysis {
+  total_drops: number;
+  total_drop_duration_seconds: number;
+  average_drop_duration_seconds: number;
+  longest_drop: ConcentrationEvent | null;
+  events: ConcentrationEvent[];
+}
 
 interface ReportData {
   id: string;
@@ -34,6 +52,7 @@ interface ReportData {
     concentration: number;
     engagement_score: number;
   }>;
+  concentration_analysis?: ConcentrationAnalysis;
 }
 
 const ReportPage: React.FC = () => {
@@ -54,10 +73,47 @@ const ReportPage: React.FC = () => {
   const fetchReport = async () => {
     try {
       setLoading(true);
-      const response = await api.post(`/reports/generate/${sessionType}/${sessionId}`, {
-        studentId: user?.id,
-      });
-      setReport(response.data.report);
+      // Use live session API for live sessions, regular API for recorded
+      if (sessionType === 'live' && sessionId) {
+        const response = await liveSessionsApi.getReport(sessionId);
+        // Transform live session report to match ReportData interface
+        const liveReport = response.report;
+        if (user?.role === 'teacher' && liveReport.students) {
+          // Teacher sees aggregated data
+          const firstStudent = liveReport.students[0];
+          if (firstStudent) {
+            setReport({
+              id: liveReport.session.id,
+              overall_engagement: liveReport.overall_avg_engagement || 0,
+              average_concentration: liveReport.overall_avg_concentration || 0,
+              average_emotion: firstStudent.dominant_emotion,
+              engagement_drops: 0, // Not calculated for live sessions
+              focus_percentage: (firstStudent.emotion_counts.focused || 0) / firstStudent.total_logs * 100,
+              boredom_percentage: (firstStudent.emotion_counts.bored || 0) / firstStudent.total_logs * 100,
+              confusion_percentage: (firstStudent.emotion_counts.confused || 0) / firstStudent.total_logs * 100,
+              sleepiness_percentage: (firstStudent.emotion_counts.sleepy || 0) / firstStudent.total_logs * 100,
+              timeline: firstStudent.timeline.map((t: any) => ({
+                emotion: t.emotion,
+                timestamp: t.timestamp,
+                concentration: t.concentration_score,
+                engagement_score: t.engagement_score,
+              })),
+            });
+          }
+        } else if (liveReport.student_data) {
+          // For students, generate report using the standard endpoint to get concentration analysis
+          const reportResponse = await api.post(`/reports/generate/live/${sessionId}`, {
+            studentId: user?.id,
+          });
+          setReport(reportResponse.data.report);
+        }
+      } else {
+        // Recorded session - use existing endpoint
+        const response = await api.post(`/reports/generate/${sessionType}/${sessionId}`, {
+          studentId: user?.id,
+        });
+        setReport(response.data.report);
+      }
       setError(null);
     } catch (err: any) {
       console.error('Error fetching report:', err);
@@ -220,6 +276,93 @@ const ReportPage: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Concentration Drop/Recovery Analysis */}
+        {report.concentration_analysis && report.concentration_analysis.total_drops > 0 && (
+          <div className="report-details">
+            <h2>Concentration Analysis</h2>
+            <div className="report-summary" style={{ marginBottom: '2rem' }}>
+              <div className="stat-card">
+                <h3>Total Concentration Drops</h3>
+                <p className="stat-value">{report.concentration_analysis.total_drops}</p>
+              </div>
+              <div className="stat-card">
+                <h3>Total Low Concentration Time</h3>
+                <p className="stat-value">
+                  {Math.floor(report.concentration_analysis.total_drop_duration_seconds / 60)}m{' '}
+                  {Math.floor(report.concentration_analysis.total_drop_duration_seconds % 60)}s
+                </p>
+              </div>
+              <div className="stat-card">
+                <h3>Average Drop Duration</h3>
+                <p className="stat-value">
+                  {Math.floor(report.concentration_analysis.average_drop_duration_seconds / 60)}m{' '}
+                  {Math.floor(report.concentration_analysis.average_drop_duration_seconds % 60)}s
+                </p>
+              </div>
+              {report.concentration_analysis.longest_drop && (
+                <div className="stat-card">
+                  <h3>Longest Drop Duration</h3>
+                  <p className="stat-value">
+                    {Math.floor(report.concentration_analysis.longest_drop.duration_seconds / 60)}m{' '}
+                    {Math.floor(report.concentration_analysis.longest_drop.duration_seconds % 60)}s
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="concentration-events">
+              <h3>Concentration Drop Events</h3>
+              <table style={{ width: '100%', marginTop: '1rem', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #ddd', backgroundColor: '#f5f5f5' }}>
+                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Start Time</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>End Time</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Duration</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Start Concentration</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Recovery Concentration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.concentration_analysis.events.map((event, index) => (
+                    <tr key={index} style={{ borderBottom: '1px solid #eee' }}>
+                      <td style={{ padding: '0.75rem' }}>
+                        {Math.floor(event.start_timestamp / 60)}m {event.start_timestamp % 60}s
+                      </td>
+                      <td style={{ padding: '0.75rem' }}>
+                        {event.recovery_concentration !== null
+                          ? `${Math.floor(event.end_timestamp / 60)}m ${event.end_timestamp % 60}s`
+                          : 'Ongoing'}
+                      </td>
+                      <td style={{ padding: '0.75rem' }}>
+                        {Math.floor(event.duration_seconds / 60)}m {Math.floor(event.duration_seconds % 60)}s
+                      </td>
+                      <td
+                        style={{
+                          padding: '0.75rem',
+                          color: event.start_concentration < 40 ? '#f44336' : '#666',
+                          fontWeight: event.start_concentration < 40 ? 'bold' : 'normal',
+                        }}
+                      >
+                        {event.start_concentration.toFixed(1)}%
+                      </td>
+                      <td
+                        style={{
+                          padding: '0.75rem',
+                          color:
+                            event.recovery_concentration && event.recovery_concentration >= 60 ? '#4caf50' : '#666',
+                          fontWeight: event.recovery_concentration && event.recovery_concentration >= 60 ? 'bold' : 'normal',
+                        }}
+                      >
+                        {event.recovery_concentration !== null ? `${event.recovery_concentration.toFixed(1)}%` : 'N/A'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

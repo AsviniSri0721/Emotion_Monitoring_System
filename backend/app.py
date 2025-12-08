@@ -7,6 +7,7 @@ import logging
 from datetime import datetime
 
 from routes import auth, videos, sessions, emotions, reports, interventions
+from live_sessions import routes as live_sessions_routes
 from services.database import init_db
 from config_logging import setup_logging
 
@@ -133,6 +134,7 @@ app.register_blueprint(sessions.bp, url_prefix='/api/sessions')
 app.register_blueprint(emotions.bp, url_prefix='/api/emotions')
 app.register_blueprint(reports.bp, url_prefix='/api/reports')
 app.register_blueprint(interventions.bp, url_prefix='/api/interventions')
+app.register_blueprint(live_sessions_routes.bp, url_prefix='/api/live-sessions')
 
 # Serve uploaded videos
 @app.route('/uploads/<filename>')
