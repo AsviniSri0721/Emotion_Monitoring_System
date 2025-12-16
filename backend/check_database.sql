@@ -75,3 +75,4 @@ WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'session_participants';
 
 
 
+

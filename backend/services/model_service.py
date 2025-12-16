@@ -25,23 +25,19 @@ class ModelService:
         self.models_loaded = False
         self.cnn_model = None
         self.yolo_model = None
-        self.yolo_onnx_session = None  # For ONNX YOLO models
-        self.use_yolo_onnx = False
         self.model_config = {}
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        self.image_processor = None  # HuggingFace AutoImageProcessor
         self.debug_dir = None  # Debug directory for saving face crops
         self.emotion_labels = None  # Emotion labels from model
-        self.hf_checkpoint = None  # HuggingFace checkpoint name
         self.id2label = None  # ID to label mapping
         self.label2id = None  # Label to ID mapping
+        self.transform = None  # TorchVision transforms for preprocessing
         logger.info(f"Using device: {self.device}")
     
     def load_models(self):
         """Load all trained models"""
         try:
-            # Load YOLOv8 model for face detection
-            # Priority: ONNX face model > PyTorch face model > default YOLOv8n
+            # Load YOLOv8 model for face detection (PyTorch .pt only)
             yolo_model_path = os.getenv('YOLO_MODEL_PATH', None)
             yolo_loaded = False
             
@@ -57,25 +53,28 @@ class ModelService:
                     logger.warning(f"YOLO_MODEL_PATH env var points to non-existent file: {yolo_model_path} (resolved: {abs_yolo_path}). Will search for model.")
                     yolo_model_path = None
             
-            # Search for YOLO models if not specified or path doesn't exist
+            # Search for YOLO .pt models if not specified or path doesn't exist
             if not yolo_model_path:
                 script_dir = os.path.dirname(os.path.abspath(__file__))
                 backend_dir = os.path.dirname(script_dir)
                 cwd = os.getcwd()
                 project_root = os.path.dirname(backend_dir) if os.path.basename(backend_dir) == 'backend' else os.path.dirname(cwd)
                 
-                # PRIORITY CHECK: Direct check for known model location
+                # PRIORITY CHECK: Direct check for known model location (.pt files only)
                 priority_paths = [
-                    os.path.join(project_root, 'backend', 'backend', 'models', 'yolov8n-face.onnx'),
-                    os.path.join(cwd, 'backend', 'backend', 'models', 'yolov8n-face.onnx'),
-                    os.path.join(backend_dir, 'backend', 'models', 'yolov8n-face.onnx'),
+                    os.path.join(project_root, 'backend', 'backend', 'models', 'yolov8n.pt'),
+                    os.path.join(cwd, 'backend', 'backend', 'models', 'yolov8n.pt'),
+                    os.path.join(backend_dir, 'backend', 'models', 'yolov8n.pt'),
+                    os.path.join(project_root, 'backend', 'backend', 'models', 'yolov8_face.pt'),
+                    os.path.join(cwd, 'backend', 'backend', 'models', 'yolov8_face.pt'),
+                    os.path.join(backend_dir, 'backend', 'models', 'yolov8_face.pt'),
                 ]
                 
                 print("\n" + "="*70)
-                print("YOLO MODEL SEARCH - Starting Priority Check")
+                print("YOLO MODEL SEARCH - Starting Priority Check (.pt files only)")
                 print("="*70)
                 logger.info("="*70)
-                logger.info("YOLO MODEL SEARCH - Starting Priority Check")
+                logger.info("YOLO MODEL SEARCH - Starting Priority Check (.pt files only)")
                 logger.info("="*70)
                 
                 for priority_path in priority_paths:
@@ -99,25 +98,23 @@ class ModelService:
                     logger.info("Priority check failed. Starting full search...")
                     
                     yolo_paths = [
-                        # ONNX face detection model (priority)
-                        # When running from backend/, model is at backend/backend/models/
-                        os.path.join(cwd, 'backend', 'models', 'yolov8n-face.onnx'),  # backend/backend/models/ when cwd=backend/
-                        os.path.join(backend_dir, 'backend', 'models', 'yolov8n-face.onnx'),  # backend/backend/models/
-                        os.path.join(os.path.dirname(cwd), 'backend', 'backend', 'models', 'yolov8n-face.onnx'),  # From project root
-                        os.path.join(cwd, 'models', 'yolov8n-face.onnx'),  # backend/models/ when cwd=backend/
-                        'backend/models/yolov8n-face.onnx',
-                        'backend/backend/models/yolov8n-face.onnx',
-                        './backend/models/yolov8n-face.onnx',  # Explicit relative
-                        '../backend/models/yolov8n-face.onnx',  # From project root
-                        'models/yolov8n-face.onnx',
-                        # PyTorch models
-                        os.path.join(cwd, 'models', 'yolov8_face.pt'),
+                        # PyTorch face detection models (.pt files only)
+                        os.path.join(cwd, 'backend', 'models', 'yolov8n.pt'),
+                        os.path.join(backend_dir, 'backend', 'models', 'yolov8n.pt'),
+                        os.path.join(os.path.dirname(cwd), 'backend', 'backend', 'models', 'yolov8n.pt'),
+                        os.path.join(cwd, 'models', 'yolov8n.pt'),
+                        'backend/models/yolov8n.pt',
+                        'backend/backend/models/yolov8n.pt',
+                        './backend/models/yolov8n.pt',
+                        '../backend/models/yolov8n.pt',
+                        'models/yolov8n.pt',
+                        os.path.join(cwd, 'backend', 'models', 'yolov8_face.pt'),
                         os.path.join(backend_dir, 'models', 'yolov8_face.pt'),
                         'models/yolov8_face.pt',
                     ]
                     
-                    print(f"Searching for YOLO model. CWD: {cwd}, Backend dir: {backend_dir}, Project root: {project_root}")
-                    logger.info(f"Searching for YOLO model. CWD: {cwd}, Backend dir: {backend_dir}, Project root: {project_root}")
+                    print(f"Searching for YOLO model (.pt files only). CWD: {cwd}, Backend dir: {backend_dir}, Project root: {project_root}")
+                    logger.info(f"Searching for YOLO model (.pt files only). CWD: {cwd}, Backend dir: {backend_dir}, Project root: {project_root}")
                     for i, path in enumerate(yolo_paths):
                         abs_path = os.path.abspath(path)
                         exists = os.path.exists(abs_path)
@@ -135,46 +132,16 @@ class ModelService:
                         logger.warning(f"YOLO model not found after checking {len(yolo_paths)} paths")
                         logger.warning(f"First 5 paths: {[os.path.abspath(p) for p in yolo_paths[:5]]}")
             
-            # Try to load YOLO model
+            # Try to load YOLO PyTorch model (.pt files only)
             if yolo_model_path and os.path.exists(yolo_model_path):
-                file_size_mb = os.path.getsize(yolo_model_path) / (1024 * 1024)
-                print(f"\nAttempting to load YOLO model from: {yolo_model_path}")
-                print(f"  → File size: {file_size_mb:.2f} MB")
-                logger.info(f"Attempting to load YOLO model from: {yolo_model_path} ({file_size_mb:.2f} MB)")
-                if yolo_model_path.endswith('.onnx'):
-                    # Load ONNX model
-                    try:
-                        import onnxruntime as ort
-                        providers = ['CPUExecutionProvider']
-                        if self.device == 'cuda':
-                            try:
-                                providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-                            except:
-                                logger.warning("CUDA provider not available for YOLO, using CPU")
-                        
-                        print(f"  → Loading ONNX model with providers: {providers}")
-                        logger.info(f"Loading ONNX model with providers: {providers}")
-                        self.yolo_onnx_session = ort.InferenceSession(yolo_model_path, providers=providers)
-                        self.use_yolo_onnx = True
-                        print(f"✓ YOLOv8 ONNX model loaded successfully!")
-                        print(f"  → Model path: {yolo_model_path}")
-                        print(f"  → Device: {self.device}")
-                        logger.info(f"✓ YOLOv8 ONNX model loaded successfully from {yolo_model_path}")
-                        logger.info(f"  Device: {self.device}, Providers: {providers}")
-                        yolo_loaded = True
-                    except ImportError:
-                        print("✗ ERROR: onnxruntime not available")
-                        logger.error("onnxruntime not available. Install with: pip install onnxruntime")
-                        logger.error("Please run: pip install onnxruntime")
-                        logger.warning("Falling back to default YOLOv8n")
-                    except Exception as e:
-                        print(f"✗ ERROR loading ONNX YOLO model: {str(e)}")
-                        logger.error(f"Error loading ONNX YOLO model: {str(e)}")
-                        import traceback
-                        logger.error(f"Traceback: {traceback.format_exc()}")
-                        logger.warning("Falling back to default YOLOv8n")
+                if not yolo_model_path.endswith('.pt'):
+                    logger.warning(f"YOLO model path does not end with .pt: {yolo_model_path}. Skipping.")
+                    yolo_model_path = None
                 else:
-                    # Load PyTorch model
+                    file_size_mb = os.path.getsize(yolo_model_path) / (1024 * 1024)
+                    print(f"\nAttempting to load YOLO PyTorch model from: {yolo_model_path}")
+                    print(f"  → File size: {file_size_mb:.2f} MB")
+                    logger.info(f"Attempting to load YOLO PyTorch model from: {yolo_model_path} ({file_size_mb:.2f} MB)")
                     try:
                         print(f"  → Loading PyTorch model...")
                         logger.info(f"Loading PyTorch YOLO model...")
@@ -182,10 +149,13 @@ class ModelService:
                         print(f"✓ YOLOv8 PyTorch model loaded successfully!")
                         print(f"  → Model path: {yolo_model_path}")
                         logger.info(f"YOLOv8 PyTorch model loaded from {yolo_model_path}")
+                        logger.info("YOLO face detector loaded (PyTorch .pt)")
                         yolo_loaded = True
                     except Exception as e:
                         print(f"✗ ERROR loading PyTorch YOLO model: {str(e)}")
                         logger.error(f"Error loading PyTorch YOLO model: {str(e)}")
+                        import traceback
+                        logger.error(f"Traceback: {traceback.format_exc()}")
                         logger.warning("Falling back to default YOLOv8n")
             
             if not yolo_loaded:
@@ -196,6 +166,7 @@ class ModelService:
                     self.yolo_model = YOLO('yolov8n.pt')
                     print("  → Default YOLOv8n model loaded")
                     logger.info("Default YOLOv8n model loaded")
+                    logger.info("YOLO face detector loaded (PyTorch .pt)")
                 except Exception as e:
                     print(f"✗ ERROR loading default YOLOv8n: {str(e)}")
                     logger.error(f"Error loading default YOLOv8n: {str(e)}")
@@ -204,13 +175,8 @@ class ModelService:
             print("\n" + "="*70)
             print("YOLO MODEL LOADING SUMMARY")
             print("="*70)
-            if self.use_yolo_onnx and self.yolo_onnx_session:
-                print(f"✓ Status: LOADED (ONNX)")
-                print(f"  → Model: yolov8n-face.onnx (Face Detection)")
-                print(f"  → Path: {yolo_model_path if yolo_model_path else 'N/A'}")
-                print(f"  → Device: {self.device}")
-            elif self.yolo_model:
-                model_name = "yolov8n-face.onnx" if yolo_model_path and 'face' in yolo_model_path else "yolov8_face.pt" if yolo_model_path and 'face' in yolo_model_path else "yolov8n.pt (default)"
+            if self.yolo_model:
+                model_name = "yolov8n.pt" if yolo_model_path and 'face' in yolo_model_path else "yolov8_face.pt" if yolo_model_path and 'face' in yolo_model_path else "yolov8n.pt (default)"
                 print(f"✓ Status: LOADED (PyTorch)")
                 print(f"  → Model: {model_name}")
                 print(f"  → Path: {yolo_model_path if yolo_model_path else 'yolov8n.pt (downloaded)'}")
@@ -221,19 +187,19 @@ class ModelService:
             print("="*70 + "\n")
             logger.info("="*70)
             logger.info("YOLO MODEL LOADING SUMMARY")
-            if self.use_yolo_onnx and self.yolo_onnx_session:
-                logger.info(f"Status: LOADED (ONNX) - yolov8n-face.onnx at {yolo_model_path}")
-            elif self.yolo_model:
+            if self.yolo_model:
                 logger.info(f"Status: LOADED (PyTorch) - {yolo_model_path if yolo_model_path else 'yolov8n.pt (default)'}")
+                logger.info("YOLO face detector loaded (PyTorch .pt)")
             else:
                 logger.error("Status: FAILED - No YOLO model loaded")
             logger.info("="*70)
             
-            # ----------------- LOAD EMOTION MODEL (HuggingFace MobileNetV2) -----------------
-            from transformers import AutoConfig, AutoImageProcessor, AutoModelForImageClassification
+            # ----------------- LOAD EMOTION MODEL (TorchVision ResNet50) -----------------
+            from torchvision import models
+            import torch.nn as nn
             
-            cnn_model_path = os.getenv("CNN_MODEL_PATH", "models/mobilenetv2_emotion_model_CPU.pkl")
-            self.model_type = "mobilenetv2"
+            cnn_model_path = os.getenv("CNN_MODEL_PATH", "models/resnet50_emotion_model_CPU.pkl")
+            self.model_type = "resnet50"
             self.use_onnx = False
             
             # Search for .pkl file if path doesn't exist
@@ -243,14 +209,23 @@ class ModelService:
                 cwd = os.getcwd()
                 
                 search_paths = [
-                    os.path.join(backend_dir, "models", "mobilenetv2_emotion_model_CPU.pkl"),
-                    os.path.join(backend_dir, "backend", "models", "mobilenetv2_emotion_model_CPU.pkl"),
-                    os.path.join(cwd, "backend", "models", "mobilenetv2_emotion_model_CPU.pkl"),
-                    os.path.join(cwd, "backend", "backend", "models", "mobilenetv2_emotion_model_CPU.pkl"),
-                    os.path.join(cwd, "models", "mobilenetv2_emotion_model_CPU.pkl"),
-                    "models/mobilenetv2_emotion_model_CPU.pkl",
-                    "backend/models/mobilenetv2_emotion_model_CPU.pkl",
-                    "backend/backend/models/mobilenetv2_emotion_model_CPU.pkl",
+                    os.path.join(backend_dir, "models", "resnet50_emotion_model_CPU.pkl"),
+                    os.path.join(backend_dir, "backend", "models", "resnet50_emotion_model_CPU.pkl"),
+                    os.path.join(cwd, "backend", "models", "resnet50_emotion_model_CPU.pkl"),
+                    os.path.join(cwd, "backend", "backend", "models", "resnet50_emotion_model_CPU.pkl"),
+                    os.path.join(cwd, "models", "resnet50_emotion_model_CPU.pkl"),
+                    "models/resnet50_emotion_model_CPU.pkl",
+                    "backend/models/resnet50_emotion_model_CPU.pkl",
+                    "backend/backend/models/resnet50_emotion_model_CPU.pkl",
+                    # Also try without _CPU suffix
+                    os.path.join(backend_dir, "models", "resnet50_emotion_model.pkl"),
+                    os.path.join(backend_dir, "backend", "models", "resnet50_emotion_model.pkl"),
+                    os.path.join(cwd, "backend", "models", "resnet50_emotion_model.pkl"),
+                    os.path.join(cwd, "backend", "backend", "models", "resnet50_emotion_model.pkl"),
+                    os.path.join(cwd, "models", "resnet50_emotion_model.pkl"),
+                    "models/resnet50_emotion_model.pkl",
+                    "backend/models/resnet50_emotion_model.pkl",
+                    "backend/backend/models/resnet50_emotion_model.pkl",
                 ]
                 
                 for path in search_paths:
@@ -280,36 +255,39 @@ class ModelService:
             labels = payload["labels"]
             id2label = payload["id2label"]
             label2id = payload["label2id"]
-            checkpoint = payload.get("checkpoint", "google/mobilenet_v2_1.0_224")
             
-            self.hf_checkpoint = checkpoint
             self.emotion_labels = labels
             self.id2label = id2label
             self.label2id = label2id
             
-            # Load model config and create model
-            cfg = AutoConfig.from_pretrained(
-                checkpoint,
-                num_labels=len(labels),
-                id2label=id2label,
-                label2id=label2id,
-            )
-            
-            model = AutoModelForImageClassification.from_config(cfg)
-            model.load_state_dict(state_dict, strict=False)
+            # Create TorchVision ResNet50 model
+            num_classes = len(labels)
+            model = models.resnet50(weights=None)
+            model.fc = nn.Linear(model.fc.in_features, num_classes)
+            model.load_state_dict(state_dict)
             model.to(self.device)
             model.eval()
             
             self.cnn_model = model
             cnn_loaded = True
             
-            print("\n===== CNN MODEL LOADED (HF MobileNetV2) =====")
-            print("Checkpoint:", checkpoint)
+            # Initialize TorchVision transforms for preprocessing
+            from torchvision import transforms
+            self.transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225],
+                )
+            ])
+            
+            print("\n===== CNN MODEL LOADED (TorchVision ResNet50) =====")
             print("Labels:", labels)
             print("Device:", self.device)
             print("=============================================\n")
-            logger.info("===== CNN MODEL LOADED (HF MobileNetV2) =====")
-            logger.info(f"Checkpoint: {checkpoint}")
+            logger.info("===== CNN MODEL LOADED (TorchVision ResNet50) =====")
+            logger.info(f"Loaded ResNet50 emotion model with {len(labels)} classes")
             logger.info(f"Labels: {labels}")
             logger.info(f"Device: {self.device}")
             logger.info("=============================================")
@@ -335,9 +313,6 @@ class ModelService:
                 logger.info("="*70)
                 logger.info(f"CNN MODEL LOADING SUMMARY - {self.model_type} at {cnn_model_path}")
                 logger.info("="*70)
-            
-            # Load HuggingFace image processor FIRST (needed for preprocessing)
-            self._load_hf_processor()
             
             # Load additional models if specified
             self._load_additional_models()
@@ -376,48 +351,6 @@ class ModelService:
                 except Exception as e:
                     logger.error(f"Error loading additional model {model_path}: {str(e)}")
     
-    def _load_hf_processor(self):
-        """Load HuggingFace AutoImageProcessor for preprocessing"""
-        from transformers import AutoImageProcessor
-        import os
-        
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        backend_dir = os.path.dirname(script_dir)
-        candidate_paths = [
-            os.path.join(backend_dir, "models", "mobilenetv2_processor"),
-            os.path.join(script_dir, "..", "models", "mobilenetv2_processor"),
-            os.path.join(os.getcwd(), "backend/models/mobilenetv2_processor"),
-            os.path.join(backend_dir, "backend", "models", "mobilenetv2_processor"),
-            os.path.join(os.getcwd(), "backend", "backend", "models", "mobilenetv2_processor"),
-            "backend/models/mobilenetv2_processor",
-            "backend/backend/models/mobilenetv2_processor",
-        ]
-        
-        for p in candidate_paths:
-            cfg_path = os.path.join(p, "preprocessor_config.json")
-            if os.path.exists(cfg_path):
-                try:
-                    self.image_processor = AutoImageProcessor.from_pretrained(p)
-                    print("✓ Loaded HF processor from:", p)
-                    logger.info(f"✓ Loaded HF processor from: {p}")
-                    return
-                except Exception as e:
-                    logger.warning(f"Failed to load processor from {p}: {str(e)}, trying HF checkpoint")
-                    break
-        
-        print("⚠️ mobilenetv2_processor not found or invalid, using HF checkpoint processor")
-        logger.warning("mobilenetv2_processor not found or invalid, using HF checkpoint processor")
-        try:
-            self.image_processor = AutoImageProcessor.from_pretrained(self.hf_checkpoint)
-        except Exception as e:
-            logger.error(f"Failed to load processor from HF checkpoint {self.hf_checkpoint}: {str(e)}")
-            # Use a default processor if available
-            try:
-                self.image_processor = AutoImageProcessor.from_pretrained("google/mobilenet_v2_1.0_224")
-                logger.info("Using default processor: google/mobilenet_v2_1.0_224")
-            except Exception as e2:
-                logger.error(f"Failed to load default processor: {str(e2)}")
-                self.image_processor = None
     
     def _setup_debug_dir(self):
         """Create debug directory for saving face crop previews"""
@@ -433,25 +366,18 @@ class ModelService:
     
     def detect_faces(self, image: np.ndarray) -> List[Dict]:
         """
-        Detect faces in image using YOLOv8 (ONNX or PyTorch)
+        Detect faces in image using YOLOv8 PyTorch (.pt)
         Returns list of face bounding boxes and confidence scores
         """
         logger.info(f"[FaceDetection] Starting face detection. Image shape: {image.shape}, dtype: {image.dtype}")
         logger.info(f"[FaceDetection] Image value range: min={image.min()}, max={image.max()}")
-        logger.info(f"[FaceDetection] Using {'ONNX' if self.use_yolo_onnx else 'PyTorch'} YOLO model")
+        logger.info(f"[FaceDetection] Using PyTorch YOLO model")
         
-        if self.use_yolo_onnx:
-            if self.yolo_onnx_session is None:
-                logger.error("[FaceDetection] YOLOv8 ONNX model not loaded")
-                raise ValueError("YOLOv8 ONNX model not loaded")
-            logger.info("[FaceDetection] Using ONNX YOLO model")
-            faces = self._detect_faces_onnx(image)
-        else:
-            if self.yolo_model is None:
-                logger.error("[FaceDetection] YOLOv8 PyTorch model not loaded")
-                raise ValueError("YOLOv8 model not loaded")
-            logger.info("[FaceDetection] Using PyTorch YOLO model")
-            faces = self._detect_faces_pytorch(image)
+        if self.yolo_model is None:
+            logger.error("[FaceDetection] YOLOv8 PyTorch model not loaded")
+            raise ValueError("YOLOv8 model not loaded")
+        
+        faces = self._detect_faces_pytorch(image)
         
         logger.info(f"[FaceDetection] Detected {len(faces)} face(s)")
         if len(faces) > 0:
@@ -464,466 +390,6 @@ class ModelService:
             logger.warning("[FaceDetection] 3. Face is not visible or too small")
             logger.warning("[FaceDetection] 4. Confidence threshold is too high")
         return faces
-    
-    def _detect_faces_onnx(self, image: np.ndarray) -> List[Dict]:
-        """Detect faces using ONNX YOLO model"""
-        try:
-            import onnxruntime as ort
-            from onnxruntime import InferenceSession
-            
-            # Type guard: ensure session is not None
-            if self.yolo_onnx_session is None:
-                raise ValueError("YOLOv8 ONNX session is not initialized")
-            
-            # Type narrowing: assign to local variable with explicit type
-            session: InferenceSession = self.yolo_onnx_session
-            
-            logger.debug(f"[ONNX FaceDetection] Input image shape: {image.shape}, dtype: {image.dtype}")
-            
-            # Get input and output names
-            input_name = session.get_inputs()[0].name
-            output_names = [output.name for output in session.get_outputs()]
-            logger.debug(f"[ONNX FaceDetection] Input name: {input_name}, Output names: {output_names}")
-            
-            # Preprocess image for YOLO (resize to 640x640, normalize)
-            original_shape = image.shape[:2]  # (H, W)
-            input_size = 640
-            resized = cv2.resize(image, (input_size, input_size))
-            logger.debug(f"[ONNX FaceDetection] Resized to: {resized.shape}, Original: {original_shape}")
-            
-            # Convert BGR to RGB and normalize
-            if len(resized.shape) == 3:
-                resized = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
-            resized = resized.astype(np.float32) / 255.0
-            
-            # Transpose to (1, 3, H, W) format
-            input_tensor = resized.transpose(2, 0, 1)[np.newaxis, ...]
-            logger.debug(f"[ONNX FaceDetection] Input tensor shape: {input_tensor.shape}, range: [{input_tensor.min():.3f}, {input_tensor.max():.3f}]")
-            
-            # Run inference
-            outputs = session.run(output_names, {input_name: input_tensor})
-            
-            # Ensure outputs are numpy arrays
-            outputs = [np.asarray(out) if not isinstance(out, np.ndarray) else out for out in outputs]
-            
-            logger.info(f"[ONNX FaceDetection] Number of outputs: {len(outputs)}")
-            for i, out in enumerate(outputs):
-                # Ensure output is a numpy array
-                out_array: np.ndarray = np.asarray(out)
-                logger.info(f"[ONNX FaceDetection] Output {i} shape: {out_array.shape}, dtype: {out_array.dtype}, min={out_array.min():.3f}, max={out_array.max():.3f}, mean={out_array.mean():.3f}")
-                if out_array.size > 0 and out_array.size < 1000:
-                    logger.info(f"[ONNX FaceDetection] Output {i} all values: {out_array.flatten()}")
-                elif out_array.size > 0:
-                    logger.info(f"[ONNX FaceDetection] Output {i} sample values (first 20): {out_array.flatten()[:20]}")
-            
-            # Try to find the correct output - YOLOv8 might have multiple outputs
-            # Look for output with shape that suggests detections
-            output_array = None
-            for i, out in enumerate(outputs):
-                out_arr = np.asarray(out)
-                # Prefer outputs that look like detection format
-                if len(out_arr.shape) == 3 and out_arr.shape[0] == 1 and out_arr.shape[2] >= 6:
-                    # Shape like [1, num_detections, 6+] - this is likely the detection output
-                    output_array = out_arr
-                    logger.info(f"[ONNX FaceDetection] Using output {i} as detection output: {output_array.shape}")
-                    break
-                elif len(out_arr.shape) == 2 and out_arr.shape[1] >= 6:
-                    # Shape like [num_detections, 6+] - also detection format
-                    output_array = out_arr
-                    logger.info(f"[ONNX FaceDetection] Using output {i} as detection output: {output_array.shape}")
-                    break
-            
-            # If no detection-like output found, use first output
-            if output_array is None:
-                output_array = np.asarray(outputs[0])
-                logger.warning(f"[ONNX FaceDetection] No detection-like output found, using first output: {output_array.shape}")
-            
-            logger.info(f"[ONNX FaceDetection] Processing output shape: {output_array.shape}, ndim={output_array.ndim}")
-            
-            # Handle different output formats
-            # YOLOv8 can output in different shapes:
-            # - [1, num_detections, 6] - standard format
-            # - [1, 6, num_detections] - transposed
-            # - [num_detections, 6] - no batch dimension
-            # - [1, 8400, 4+num_classes] - raw YOLO output (needs NMS)
-            # - [1, 80, 80, 80] - 4D feature map (needs decoding)
-            
-            faces = []
-            detections_before_filter = 0
-            detections_after_confidence = 0
-            
-            # Try to handle different output shapes - CHECK 4D FIRST since that's what we're getting
-            if len(output_array.shape) == 4:
-                # Handle 4D output FIRST - this is what yolov8n-face.onnx outputs
-                logger.warning(f"[ONNX FaceDetection] Detected 4D feature map output: {output_array.shape}")
-                logger.warning(f"[ONNX FaceDetection] ONNX model outputs feature map instead of detections - falling back to PyTorch YOLO")
-                
-                # Fallback: Load PyTorch YOLO model instead
-                try:
-                    yolo_pt_paths = [
-                        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'backend', 'models', 'yolov8n-face.pt'),
-                        os.path.join(os.getcwd(), 'backend', 'models', 'yolov8n-face.pt'),
-                        os.path.join(os.getcwd(), 'backend', 'backend', 'models', 'yolov8n-face.pt'),
-                        'yolov8n-face.pt',
-                    ]
-                    
-                    yolo_pt_path = None
-                    for path in yolo_pt_paths:
-                        abs_path = os.path.abspath(path)
-                        if os.path.exists(abs_path):
-                            yolo_pt_path = abs_path
-                            break
-                    
-                    if yolo_pt_path:
-                        logger.info(f"[ONNX FaceDetection] Loading PyTorch YOLO fallback from: {yolo_pt_path}")
-                        self.yolo_model = YOLO(yolo_pt_path)
-                        self.use_yolo_onnx = False
-                        # Use PyTorch detection instead
-                        return self._detect_faces_pytorch(image)
-                    else:
-                        logger.warning("[ONNX FaceDetection] PyTorch YOLO fallback not found, trying default YOLOv8n")
-                        self.yolo_model = YOLO('yolov8n.pt')
-                        self.use_yolo_onnx = False
-                        return self._detect_faces_pytorch(image)
-                except Exception as fallback_error:
-                    logger.error(f"[ONNX FaceDetection] Fallback to PyTorch failed: {str(fallback_error)}")
-                    # Continue with manual decoding as last resort
-                    logger.info(f"[ONNX FaceDetection] Processing 4D feature map output: {output_array.shape}")
-                    logger.info(f"[ONNX FaceDetection] This is a YOLOv8 feature map - need to decode and apply NMS")
-                
-                # Remove batch dimension
-                feature_map = output_array[0]  # Shape: (80, 80, 80)
-                grid_h, grid_w, channels = feature_map.shape
-                
-                logger.info(f"[ONNX FaceDetection] Feature map: grid_h={grid_h}, grid_w={grid_w}, channels={channels}")
-                
-                # YOLOv8 format: channels = 4 (bbox) + 1 (objectness) + num_classes
-                # For face detection, typically: 4 (bbox) + 1 (conf) + 1 (face class) = 6
-                # But 80 channels suggests: 4 + 1 + 75 classes OR different format
-                
-                # Try reshaping to (grid_h * grid_w, channels) and process each cell
-                num_cells = grid_h * grid_w
-                feature_map_flat = feature_map.reshape(num_cells, channels)
-                
-                logger.info(f"[ONNX FaceDetection] Flattened to: {feature_map_flat.shape}")
-                
-                # Try to extract bboxes - assume first 4 channels are bbox coords
-                # and channel 4 is confidence
-                scale_x = original_shape[1] / input_size
-                scale_y = original_shape[0] / input_size
-                
-                # Grid cell size
-                cell_w = input_size / grid_w
-                cell_h = input_size / grid_h
-                
-                detections_list = []
-                
-                for cell_idx in range(num_cells):
-                    cell_data = feature_map_flat[cell_idx]
-                    
-                    # Get cell position
-                    cell_y = cell_idx // grid_w
-                    cell_x = cell_idx % grid_w
-                    
-                    # Try different channel interpretations
-                    # YOLOv8 format: coordinates are typically sigmoid-activated and relative to cell
-                    # Format: [x_offset, y_offset, w, h, objectness, class_scores...]
-                    if channels >= 5:
-                        # Apply sigmoid to get values in 0-1 range (if needed)
-                        # Check if values are already in reasonable range
-                        x_offset_raw = float(cell_data[0])
-                        y_offset_raw = float(cell_data[1])
-                        w_raw = float(cell_data[2])
-                        h_raw = float(cell_data[3])
-                        conf_raw = float(cell_data[4])
-                        
-                        # Apply sigmoid if values are outside 0-1 range
-                        def sigmoid(x):
-                            return 1.0 / (1.0 + np.exp(-np.clip(x, -500, 500)))
-                        
-                        # Check if sigmoid is needed (values > 1 or < 0 suggest raw logits)
-                        if abs(x_offset_raw) > 1 or abs(y_offset_raw) > 1:
-                            x_offset = sigmoid(x_offset_raw)
-                            y_offset = sigmoid(y_offset_raw)
-                            w = sigmoid(w_raw) * input_size  # Scale width
-                            h = sigmoid(h_raw) * input_size  # Scale height
-                            conf = sigmoid(conf_raw)
-                        else:
-                            # Values already in 0-1 range
-                            x_offset = x_offset_raw
-                            y_offset = y_offset_raw
-                            # Width/height interpretation - be VERY conservative
-                            # YOLOv8 typically outputs relative sizes (0-1 range)
-                            # If values are in 0-1 range, they're relative to image
-                            # If values are > 1, they might be absolute pixels
-                            if 0 <= w_raw <= 1 and 0 <= h_raw <= 1:
-                                # Relative to image size - this is the correct format
-                                w = w_raw * input_size
-                                h = h_raw * input_size
-                                # Early rejection: if relative size is > 0.5, it's probably wrong
-                                if w_raw > 0.5 or h_raw > 0.5:
-                                    continue
-                            elif w_raw > 1 or h_raw > 1:
-                                # Absolute pixels - REJECT if close to image size
-                                if w_raw > input_size * 0.6 or h_raw > input_size * 0.6:
-                                    continue
-                                w = min(w_raw, input_size * 0.5)  # Cap at 50% of image
-                                h = min(h_raw, input_size * 0.5)
-                            else:
-                                # Negative or invalid values
-                                continue
-                            conf = max(0.0, min(1.0, conf_raw))  # Clamp confidence
-                        
-                        # Convert cell-relative to absolute coordinates (in 640x640 space)
-                        x_center = (cell_x + x_offset) * cell_w
-                        y_center = (cell_y + y_offset) * cell_h
-                        
-                        # CRITICAL: Ensure width/height are reasonable BEFORE converting
-                        # Face should be 5-50% of image (not 80% - that's too large)
-                        min_face_size = input_size * 0.05  # 5% minimum
-                        max_face_size = input_size * 0.5   # 50% maximum (reduced from 80%)
-                        
-                        # If w/h are already in pixel space and too large, they're wrong
-                        if w > max_face_size or h > max_face_size:
-                            continue
-                        
-                        w = np.clip(w, min_face_size, max_face_size)
-                        h = np.clip(h, min_face_size, max_face_size)
-                        
-                        # Convert to x1, y1, x2, y2 in original image coordinates
-                        x1 = (x_center - w / 2) * scale_x
-                        y1 = (y_center - h / 2) * scale_y
-                        x2 = (x_center + w / 2) * scale_x
-                        y2 = (y_center + h / 2) * scale_y
-                        
-                        # Additional validation: ensure coordinates are within image bounds
-                        x1 = max(0, min(x1, original_shape[1] - 10))  # Leave at least 10px margin
-                        y1 = max(0, min(y1, original_shape[0] - 10))
-                        x2 = max(x1 + 10, min(x2, original_shape[1]))  # Ensure minimum size
-                        y2 = max(y1 + 10, min(y2, original_shape[0]))
-                        
-                        # Validate bbox is reasonable (not covering entire image)
-                        bbox_width = x2 - x1
-                        bbox_height = y2 - y1
-                        img_width = original_shape[1]
-                        img_height = original_shape[0]
-                        
-                        # Stricter validation: face should be less than 50% of image (reduced from 80%)
-                        width_ratio = bbox_width / img_width
-                        height_ratio = bbox_height / img_height
-                        if width_ratio > 0.5 or height_ratio > 0.5:
-                            continue
-                        
-                        # Face should be at least 5% of image
-                        if width_ratio < 0.05 or height_ratio < 0.05:
-                            continue
-                        
-                        # Filter by confidence
-                        confidence_threshold = 0.3
-                        if conf > confidence_threshold:
-                            detections_list.append({
-                                'bbox': [x1, y1, x2, y2],
-                                'confidence': conf,
-                                'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2  # For NMS
-                            })
-                
-                logger.info(f"[ONNX FaceDetection] Extracted {len(detections_list)} detections from feature map")
-                
-                # Apply Non-Maximum Suppression (NMS) to remove overlapping boxes
-                if len(detections_list) > 0:
-                    # Sort by confidence
-                    detections_list.sort(key=lambda x: x['confidence'], reverse=True)
-                    
-                    # Simple NMS implementation
-                    nms_threshold = 0.5
-                    keep = []
-                    while detections_list:
-                        best = detections_list.pop(0)
-                        keep.append(best)
-                        
-                        # Remove overlapping detections
-                        detections_list = [
-                            det for det in detections_list
-                            if self._iou(best, det) < nms_threshold
-                        ]
-                    
-                    logger.info(f"[ONNX FaceDetection] After NMS: {len(keep)} faces")
-                    
-                    # Convert to final format
-                    for det in keep:
-                        x1 = max(0, int(det['x1']))
-                        y1 = max(0, int(det['y1']))
-                        x2 = min(original_shape[1], int(det['x2']))
-                        y2 = min(original_shape[0], int(det['y2']))
-                        
-                        if x2 > x1 and y2 > y1:
-                            faces.append({
-                                'bbox': [x1, y1, x2, y2],
-                                'confidence': det['confidence']
-                            })
-                            logger.info(f"[ONNX FaceDetection] Added face (4D format): bbox=[{x1}, {y1}, {x2}, {y2}], conf={det['confidence']:.3f}")
-            elif len(output_array.shape) == 3:
-                # output shape: [batch, num_detections, features]
-                detections = output_array[0]  # Get first batch
-                detections_before_filter = len(detections)
-                logger.info(f"[ONNX FaceDetection] Total detections before filtering: {detections_before_filter}")
-                
-                # Scale factors to convert from 640x640 to original size
-                scale_x = original_shape[1] / input_size
-                scale_y = original_shape[0] / input_size
-                logger.debug(f"[ONNX FaceDetection] Scale factors: x={scale_x:.3f}, y={scale_y:.3f}")
-                
-                for idx, det in enumerate(detections):
-                    if len(det) < 5:
-                        logger.debug(f"[ONNX FaceDetection] Detection {idx} has < 5 elements, skipping")
-                        continue
-                    
-                    # Get confidence (usually at index 4)
-                    conf = float(det[4])
-                    logger.debug(f"[ONNX FaceDetection] Detection {idx}: confidence={conf:.3f}, values={det[:6]}")
-                    
-                    # Filter by confidence threshold (increased to 0.3 for better quality detections)
-                    confidence_threshold = 0.3
-                    if conf < confidence_threshold:
-                        logger.debug(f"[ONNX FaceDetection] Detection {idx} filtered out (confidence {conf:.3f} < {confidence_threshold})")
-                        continue
-                    
-                    detections_after_confidence += 1
-                    
-                    # Check format - try both center+size and x1y1x2y2
-                    if len(det) >= 6:
-                        # Try center+size format first (most common for YOLO)
-                        x_center, y_center, width, height = det[0], det[1], det[2], det[3]
-                        
-                        # Convert center+size to x1, y1, x2, y2
-                        x1 = (x_center - width / 2) * scale_x
-                        y1 = (y_center - height / 2) * scale_y
-                        x2 = (x_center + width / 2) * scale_x
-                        y2 = (y_center + height / 2) * scale_y
-                    else:
-                        # Fallback: assume x1, y1, x2, y2 format
-                        x1, y1, x2, y2 = det[0], det[1], det[2], det[3]
-                        x1 *= scale_x
-                        y1 *= scale_y
-                        x2 *= scale_x
-                        y2 *= scale_y
-                    
-                    # Ensure coordinates are within image bounds
-                    x1 = max(0, int(x1))
-                    y1 = max(0, int(y1))
-                    x2 = min(original_shape[1], int(x2))
-                    y2 = min(original_shape[0], int(y2))
-                    
-                    # Only add if bbox is valid
-                    if x2 > x1 and y2 > y1:
-                        faces.append({
-                            'bbox': [x1, y1, x2, y2],
-                            'confidence': conf
-                        })
-                        logger.info(f"[ONNX FaceDetection] Added face: bbox=[{x1}, {y1}, {x2}, {y2}], conf={conf:.3f}")
-                    else:
-                        logger.warning(f"[ONNX FaceDetection] Invalid bbox for detection {idx}: [{x1}, {y1}, {x2}, {y2}]")
-            elif len(output_array.shape) == 2:
-                # Handle 2D output: [num_detections, features]
-                logger.info(f"[ONNX FaceDetection] Processing 2D output format: {output_array.shape}")
-                detections = output_array
-                detections_before_filter = len(detections)
-                logger.info(f"[ONNX FaceDetection] Total detections before filtering: {detections_before_filter}")
-                
-                scale_x = original_shape[1] / input_size
-                scale_y = original_shape[0] / input_size
-                
-                for idx, det in enumerate(detections):
-                    if len(det) < 5:
-                        continue
-                    
-                    conf = float(det[4])
-                    confidence_threshold = 0.3
-                    
-                    if conf < confidence_threshold:
-                        continue
-                    
-                    detections_after_confidence += 1
-                    
-                    if len(det) >= 6:
-                        x_center, y_center, width, height = det[0], det[1], det[2], det[3]
-                        x1 = (x_center - width / 2) * scale_x
-                        y1 = (y_center - height / 2) * scale_y
-                        x2 = (x_center + width / 2) * scale_x
-                        y2 = (y_center + height / 2) * scale_y
-                    else:
-                        x1, y1, x2, y2 = det[0], det[1], det[2], det[3]
-                        x1 *= scale_x
-                        y1 *= scale_y
-                        x2 *= scale_x
-                        y2 *= scale_y
-                    
-                    x1 = max(0, int(x1))
-                    y1 = max(0, int(y1))
-                    x2 = min(original_shape[1], int(x2))
-                    y2 = min(original_shape[0], int(y2))
-                    
-                    if x2 > x1 and y2 > y1:
-                        faces.append({
-                            'bbox': [x1, y1, x2, y2],
-                            'confidence': conf
-                        })
-                        logger.info(f"[ONNX FaceDetection] Added face (2D format): bbox=[{x1}, {y1}, {x2}, {y2}], conf={conf:.3f}")
-            else:
-                logger.warning(f"[ONNX FaceDetection] Unexpected output shape: {output_array.shape}, expected 2D, 3D, or 4D array")
-                logger.warning(f"[ONNX FaceDetection] Attempting to process as flattened array...")
-                # Try to reshape if possible
-                if output_array.size > 0:
-                    # Try common YOLO output sizes
-                    possible_shapes = [
-                        (1, output_array.size // 6, 6),  # [batch, detections, 6]
-                        (output_array.size // 6, 6),    # [detections, 6]
-                    ]
-                    for shape in possible_shapes:
-                        if output_array.size == np.prod(shape):
-                            try:
-                                reshaped = output_array.reshape(shape)
-                                logger.info(f"[ONNX FaceDetection] Successfully reshaped to: {reshaped.shape}")
-                                # Process reshaped output (recursive call would be complex, so log and continue)
-                                break
-                            except:
-                                pass
-            
-            logger.info(f"[ONNX FaceDetection] Final results: {len(faces)} valid faces")
-            
-            return faces
-            
-        except Exception as e:
-            logger.error(f"Error in ONNX face detection: {str(e)}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return []
-    
-    def _iou(self, box1: Dict, box2: Dict) -> float:
-        """Calculate Intersection over Union (IoU) of two bounding boxes"""
-        x1_1, y1_1, x2_1, y2_1 = box1['x1'], box1['y1'], box1['x2'], box1['y2']
-        x1_2, y1_2, x2_2, y2_2 = box2['x1'], box2['y1'], box2['x2'], box2['y2']
-        
-        # Calculate intersection
-        xi1 = max(x1_1, x1_2)
-        yi1 = max(y1_1, y1_2)
-        xi2 = min(x2_1, x2_2)
-        yi2 = min(y2_1, y2_2)
-        
-        if xi2 <= xi1 or yi2 <= yi1:
-            return 0.0
-        
-        inter_area = (xi2 - xi1) * (yi2 - yi1)
-        
-        # Calculate union
-        box1_area = (x2_1 - x1_1) * (y2_1 - y1_1)
-        box2_area = (x2_2 - x1_2) * (y2_2 - y1_2)
-        union_area = box1_area + box2_area - inter_area
-        
-        if union_area == 0:
-            return 0.0
-        
-        return inter_area / union_area
     
     def _detect_faces_pytorch(self, image: np.ndarray) -> List[Dict]:
         """Detect faces using PyTorch YOLO model"""
@@ -956,11 +422,10 @@ class ModelService:
             logger.error(f"Error in PyTorch face detection: {str(e)}")
             return []
     
-    def preprocess_face(self, image: np.ndarray, bbox: List[int], target_size: Optional[Tuple[int, int]] = None) -> Tuple[Optional[np.ndarray], Optional[str]]:
+    def preprocess_face(self, image: np.ndarray, bbox: List[int], target_size: Optional[Tuple[int, int]] = None) -> Tuple[Optional[Union[np.ndarray, torch.Tensor]], Optional[str]]:
         """
         Extract and preprocess face region for emotion classification
-        For MobileNetV2/EfficientNet models, use 224x224 RGB images
-        For other models, use 48x48 grayscale
+        For ResNet50 models, use 224x224 RGB images
         Returns: (preprocessed_face, error_message) where error_message is None if valid
         """
         x1, y1, x2, y2 = bbox
@@ -1036,89 +501,49 @@ class ModelService:
             except Exception as e:
                 logger.debug(f"[FacePreprocessing] Could not save debug preview: {str(e)}")
         
-        # Use HuggingFace processor if available
-        if self.image_processor is not None:
+        # Use TorchVision transforms for ResNet50 preprocessing
+        if self.transform is not None:
+            # Convert BGR to RGB
             rgb = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(rgb)
-            inputs = self.image_processor(images=pil_img, return_tensors="np")
-            face_tensor = inputs["pixel_values"]  # NCHW float32 normalized
-            logger.info(f"[FacePreprocessing] Using HuggingFace processor - output shape: {face_tensor.shape}")
-            return face_tensor, None
-        
-        # Manual preprocessing fallback (if processor not available)
-        # Determine target size based on model type
-        if target_size is None:
-            # Check model type - MobileNetV2 and EfficientNet use 224x224 RGB
-            if self.model_type in ['mobilenetv2', 'efficientnetb0'] or self.use_onnx:
-                target_size = (224, 224)
-                use_rgb = True
-            elif isinstance(self.cnn_model, torch.nn.Module):
-                # Check model name/type to determine input size
-                model_name = str(type(self.cnn_model)).lower()
-                if 'efficientnet' in model_name or 'mobilenet' in model_name or 'resnet' in model_name:
-                    target_size = (224, 224)
-                    use_rgb = True
-                else:
-                    target_size = (48, 48)
-                    use_rgb = False
+            # Apply transforms: Resize, ToTensor, Normalize
+            # ToTensor() converts PIL Image to tensor
+            transformed = self.transform(pil_img)  # Returns torch.Tensor [C, H, W]
+            # Ensure it's a tensor and add batch dimension
+            if isinstance(transformed, torch.Tensor):
+                tensor = transformed.unsqueeze(0).float()  # Add batch dimension: [1, C, H, W]
             else:
-                target_size = (48, 48)
-                use_rgb = False
-        else:
-            use_rgb = target_size[0] >= 224  # Assume RGB for larger sizes
+                # Fallback: convert to tensor if needed
+                tensor = torch.from_numpy(np.array(transformed)).unsqueeze(0).float()
+            logger.info(f"[FacePreprocessing] Using TorchVision transforms - output shape: {tensor.shape}")
+            return tensor, None
         
-        # Convert color space if needed
-        if use_rgb:
-            # MobileNetV2/EfficientNet expect RGB (not BGR)
-            if len(face_roi.shape) == 3:
-                face_roi = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
-            elif len(face_roi.shape) == 2:
-                # Convert grayscale to RGB
-                face_roi = cv2.cvtColor(face_roi, cv2.COLOR_GRAY2RGB)
-        else:
-            # Convert to grayscale for smaller models
-            if len(face_roi.shape) == 3:
-                face_roi = cv2.cvtColor(face_roi, cv2.COLOR_BGR2GRAY)
+        # Fallback: Manual preprocessing if transform not available
+        # ResNet50 expects 224x224 RGB images
+        target_size = (224, 224) if target_size is None else target_size
+        
+        # Convert BGR to RGB
+        if len(face_roi.shape) == 3:
+            face_roi = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
+        elif len(face_roi.shape) == 2:
+            face_roi = cv2.cvtColor(face_roi, cv2.COLOR_GRAY2RGB)
         
         # Resize to target size
         face_roi = cv2.resize(face_roi, target_size)
         
-        # Normalize pixel values
-        face_roi = face_roi.astype(np.float32)
+        # Normalize pixel values using ImageNet normalization
+        face_roi = face_roi.astype(np.float32) / 255.0
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        face_roi = (face_roi - mean) / std
         
-        if use_rgb:
-            # For MobileNetV2/EfficientNet: Use ImageNet normalization
-            # ImageNet mean and std
-            mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-            std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-            
-            # Normalize: (pixel / 255.0 - mean) / std
-            face_roi = face_roi / 255.0
-            face_roi = (face_roi - mean) / std
-        else:
-            # For grayscale models: simple 0-1 normalization
-            face_roi = face_roi / 255.0
-        
-        # Reshape for model input
-        if use_rgb:
-            if self.use_onnx:
-                # ONNX expects (1, 3, H, W) format
-                face_roi = face_roi.transpose(2, 0, 1)  # (H, W, 3) -> (3, H, W)
-                face_roi = np.expand_dims(face_roi, axis=0)  # (3, H, W) -> (1, 3, H, W)
-            else:
-                # PyTorch: RGB: (H, W, 3) -> (1, 3, H, W)
-                face_roi = face_roi.transpose(2, 0, 1)  # (H, W, 3) -> (3, H, W)
-                face_roi = face_roi.reshape(1, 3, target_size[0], target_size[1])
-        else:
-            # Grayscale: (H, W) -> (1, 1, H, W) for PyTorch or (1, H, W, 1) for TensorFlow
-            if isinstance(self.cnn_model, torch.nn.Module) or self.use_onnx:
-                face_roi = face_roi.reshape(1, 1, target_size[0], target_size[1])
-            else:
-                face_roi = face_roi.reshape(1, target_size[0], target_size[1], 1)
+        # Reshape for PyTorch: (H, W, 3) -> (1, 3, H, W)
+        face_roi = face_roi.transpose(2, 0, 1)  # (H, W, 3) -> (3, H, W)
+        face_roi = face_roi.reshape(1, 3, target_size[0], target_size[1])
         
         return face_roi, None
     
-    def predict_emotion(self, face_image: np.ndarray) -> Union[Dict[str, float], str]:
+    def predict_emotion(self, face_image: Union[np.ndarray, torch.Tensor]) -> Union[Dict[str, float], str]:
         """
         Predict emotion from preprocessed face image using CNN model
         Returns dictionary of emotion probabilities or "model_not_confident" (as string) if validation fails
@@ -1128,14 +553,18 @@ class ModelService:
             return "model_not_confident"
         
         try:
-            # Default emotion classes (7 emotions)
-            emotion_classes = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+            # Use emotion_labels from model as the only source of truth
+            if not hasattr(self, 'emotion_labels') or not self.emotion_labels:
+                logger.error("[EmotionPrediction] emotion_labels not loaded from model")
+                return "model_not_confident"
+            
+            emotion_classes = self.emotion_labels
             
             # Predict using the loaded model
             # Check model type in order: ONNX -> PyTorch -> Scikit-learn -> Keras/TensorFlow
             
             if self.use_onnx:
-                # ONNX model inference
+                # ONNX model inference (for emotion model - not YOLO)
                 import onnxruntime as ort
                 
                 # Type guard: ensure cnn_model is an InferenceSession
@@ -1148,9 +577,14 @@ class ModelService:
                 input_name = onnx_session.get_inputs()[0].name
                 output_name = onnx_session.get_outputs()[0].name
                 
-                # Ensure input is float32 and correct shape
-                if face_image.dtype != np.float32:
-                    face_image = face_image.astype(np.float32)
+                # Ensure input is numpy array and float32
+                if isinstance(face_image, torch.Tensor):
+                    face_image_np = face_image.cpu().numpy()
+                else:
+                    face_image_np = face_image
+                
+                if face_image_np.dtype != np.float32:
+                    face_image_np = face_image_np.astype(np.float32)
                 
                 # Run inference
                 logger.debug(f"[EmotionPrediction] Running ONNX inference - input shape: {face_image.shape}, dtype: {face_image.dtype}")
@@ -1189,30 +623,58 @@ class ModelService:
                 if prob_std < 0.01 or prob_range < 0.02:
                     logger.warning(f"[EmotionPrediction] Model not confident - std: {prob_std:.4f} (< 0.01) or range: {prob_range:.4f} (< 0.02)")
                     return "model_not_confident"
+                
+                # Create emotion dictionary from ONNX output
+                # Ensure we have the same number of classes as probabilities
+                if len(emotion_classes) != len(probabilities):
+                    logger.error(f"[EmotionPrediction] Mismatch: {len(emotion_classes)} emotion classes but {len(probabilities)} probabilities")
+                    return "model_not_confident"
+                
+                emotions = {emo: float(probabilities[i]) for i, emo in enumerate(emotion_classes)}
+                
+                # Ensure all 8 emotions are present (set missing ones to 0.0)
+                for emotion in emotion_classes:
+                    if emotion not in emotions:
+                        emotions[emotion] = 0.0
+                
+                return emotions
             
-            # PyTorch model check (including HuggingFace models)
+            # PyTorch model check (TorchVision ResNet50)
             elif isinstance(self.cnn_model, torch.nn.Module):
                 with torch.no_grad():
+                    # Handle input conversion - support both numpy arrays and torch tensors
                     if isinstance(face_image, np.ndarray):
-                        x = torch.from_numpy(face_image).float()
+                        face_tensor = torch.from_numpy(face_image).float()
+                    elif isinstance(face_image, torch.Tensor):
+                        face_tensor = face_image.float()
                     else:
-                        x = face_image.float()
+                        logger.error(f"[EmotionPrediction] Unexpected face_image type: {type(face_image)}")
+                        return "model_not_confident"
                     
-                    if x.ndim == 3:
-                        x = x.unsqueeze(0)
+                    # Ensure batch dimension (should be 4D: [batch, channels, height, width])
+                    if face_tensor.ndim == 3:
+                        face_tensor = face_tensor.unsqueeze(0)
+                    elif face_tensor.ndim != 4:
+                        logger.error(f"[EmotionPrediction] Unexpected tensor shape: {face_tensor.shape}, expected 3D or 4D")
+                        return "model_not_confident"
                     
-                    x = x.to(self.device)
-                    outputs = self.cnn_model(x)
-                    logits = outputs.logits if hasattr(outputs, "logits") else outputs
-                    probs = torch.softmax(logits, dim=-1)[0].cpu().numpy()
+                    # Move to device and run inference
+                    face_tensor = face_tensor.to(self.device)
+                    logits = self.cnn_model(face_tensor)
+                    probs = torch.softmax(logits, dim=1)[0].cpu().numpy()
                 
-                # Use emotion_labels from model loading
-                if hasattr(self, 'emotion_labels') and self.emotion_labels:
-                    emotion_classes = self.emotion_labels
-                else:
-                    emotion_classes = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
+                # Use emotion_labels from model loading (already set above)
+                # Ensure we have the same number of classes as probabilities
+                if len(emotion_classes) != len(probs):
+                    logger.error(f"[EmotionPrediction] Mismatch: {len(emotion_classes)} emotion classes but {len(probs)} probabilities")
+                    return "model_not_confident"
                 
                 emotions = {emo: float(probs[i]) for i, emo in enumerate(emotion_classes)}
+                
+                # Ensure all 8 emotions are present (set missing ones to 0.0)
+                for emotion in emotion_classes:
+                    if emotion not in emotions:
+                        emotions[emotion] = 0.0
                 
                 # Validate probabilities
                 prob_std = float(np.std(list(emotions.values())))
@@ -1227,7 +689,8 @@ class ModelService:
             # Scikit-learn model check
             elif hasattr(self.cnn_model, 'predict_proba') and callable(getattr(self.cnn_model, 'predict_proba', None)):
                 probabilities = self.cnn_model.predict_proba(face_image.reshape(1, -1))[0]  # type: ignore
-                emotion_classes = self.cnn_model.classes_ if hasattr(self.cnn_model, 'classes_') else emotion_classes  # type: ignore
+                # Use emotion_labels from model, not model.classes_
+                # emotion_classes already set above from self.emotion_labels
                 
                 # Validate emotion logits
                 prob_std = float(probabilities.std())
@@ -1257,6 +720,11 @@ class ModelService:
                 if i < len(probabilities):
                     emotion_dict[emotion] = float(probabilities[i])
             
+            # Ensure all 8 emotions are present (set missing ones to 0.0)
+            for emotion in emotion_classes:
+                if emotion not in emotion_dict:
+                    emotion_dict[emotion] = 0.0
+            
             return emotion_dict
             
         except Exception as e:
@@ -1273,13 +741,53 @@ class ModelService:
         """
         emotions = self.predict_emotion(face_tensor)
         if isinstance(emotions, str):
-            # Return default uniform probabilities if model not confident
+            # Return safe fallback distribution if model not confident
+            # This prevents artificially low or misleading scores
+            fallback_emotions = {
+                'neutral': 0.7,
+                'focus': 0.2,
+                'boredom': 0.1
+            }
+            
+            # Ensure all 8 emotions are present (set missing ones to 0.0)
             if hasattr(self, 'emotion_labels') and self.emotion_labels:
-                labels = self.emotion_labels
+                for emotion in self.emotion_labels:
+                    if emotion not in fallback_emotions:
+                        fallback_emotions[emotion] = 0.0
             else:
-                labels = ['angry', 'disgust', 'fear', 'happy', 'neutral', 'sad', 'surprise']
-            return {label: 1.0 / len(labels) for label in labels}
+                # If emotion_labels not available, use all 8 emotions
+                all_emotions = ['boredom', 'confusion', 'focus', 'frustration', 'happy', 'neutral', 'sleepy', 'surprise']
+                for emotion in all_emotions:
+                    if emotion not in fallback_emotions:
+                        fallback_emotions[emotion] = 0.0
+            
+            return fallback_emotions
         return emotions
+    
+    def _get_safe_fallback_emotions(self) -> Dict[str, float]:
+        """
+        Get safe fallback emotion distribution when model is not confident.
+        This prevents artificially low or misleading concentration scores.
+        """
+        fallback_emotions = {
+            'neutral': 0.7,
+            'focus': 0.2,
+            'boredom': 0.1
+        }
+        
+        # Ensure all 8 emotions are present (set missing ones to 0.0)
+        if hasattr(self, 'emotion_labels') and self.emotion_labels:
+            for emotion in self.emotion_labels:
+                if emotion not in fallback_emotions:
+                    fallback_emotions[emotion] = 0.0
+        else:
+            # If emotion_labels not available, use all 8 emotions
+            all_emotions = ['boredom', 'confusion', 'focus', 'frustration', 'happy', 'neutral', 'sleepy', 'surprise']
+            for emotion in all_emotions:
+                if emotion not in fallback_emotions:
+                    fallback_emotions[emotion] = 0.0
+        
+        return fallback_emotions
     
     def compute_concentration(self, emotion_probs: Dict[str, float]) -> float:
         """
@@ -1315,15 +823,20 @@ class ModelService:
             # Handle preprocessing errors
             if preprocess_error is not None or face_image is None:
                 logger.warning(f"[EmotionDetection] Face preprocessing failed: {preprocess_error}")
-                # Safe fallback
+                # Safe fallback with proper 8-emotion distribution
+                fallback_emotions = self._get_safe_fallback_emotions()
+                dominant_emotion = max(fallback_emotions.items(), key=lambda x: x[1])
+                concentration_score = self.calculate_concentration_score(fallback_emotions)
+                emotion_state = self.map_emotion_to_state(dominant_emotion[0])
+                
                 results.append({
                     'bbox': bbox,
-                    'emotions': {'neutral': 1.0},
-                    'dominant_emotion': 'neutral',
-                    'emotion_state': 'neutral',
-                    'confidence': 0.0,
-                    'engagement_score': 0.0,
-                    'concentration_score': 50.0,
+                    'emotions': fallback_emotions,
+                    'dominant_emotion': dominant_emotion[0],
+                    'emotion_state': emotion_state,
+                    'confidence': dominant_emotion[1],
+                    'engagement_score': concentration_score / 100.0,  # Convert to 0-1 range for compatibility
+                    'concentration_score': concentration_score,
                     'face_confidence': face['confidence'],
                     'error': preprocess_error
                 })
@@ -1346,15 +859,20 @@ class ModelService:
             # Handle model confidence errors
             if emotions == "model_not_confident" or not isinstance(emotions, dict):
                 logger.warning("[EmotionDetection] Model not confident, using safe fallback")
-                # Safe fallback
+                # Safe fallback with proper 8-emotion distribution
+                fallback_emotions = self._get_safe_fallback_emotions()
+                dominant_emotion = max(fallback_emotions.items(), key=lambda x: x[1])
+                concentration_score = self.calculate_concentration_score(fallback_emotions)
+                emotion_state = self.map_emotion_to_state(dominant_emotion[0])
+                
                 results.append({
                     'bbox': bbox,
-                    'emotions': {'neutral': 1.0},
-                    'dominant_emotion': 'neutral',
-                    'emotion_state': 'neutral',
-                    'confidence': 0.0,
-                    'engagement_score': 0.0,
-                    'concentration_score': 50.0,
+                    'emotions': fallback_emotions,
+                    'dominant_emotion': dominant_emotion[0],
+                    'emotion_state': emotion_state,
+                    'confidence': dominant_emotion[1],
+                    'engagement_score': concentration_score / 100.0,  # Convert to 0-1 range for compatibility
+                    'concentration_score': concentration_score,
                     'face_confidence': face['confidence'],
                     'error': 'model_not_confident'
                 })
@@ -1418,53 +936,28 @@ class ModelService:
     
     def calculate_concentration_score(self, emotions: Dict[str, float]) -> float:
         """
-        Calculate concentration score based on emotion probabilities
-        attentive = neutral, happy, surprise, focus
-        inattentive = sleepy, boredom, frustration, confusion
-        
-        score = (sum(attentive_probs) / sum(attentive + inattentive)) * 100
+        Calculate concentration score (0–100) from 8-emotion distribution.
         """
-        # Define emotion categories
-        attentive_emotions = ['neutral', 'happy', 'surprise']
-        inattentive_emotions = ['sleepy', 'boredom', 'frustration', 'confusion']
         
-        # Map detected emotions to categories (handle variations in emotion names)
-        emotion_mapping = {
-            'angry': 'frustration',
-            'disgust': 'boredom',
-            'fear': 'confusion',
-            'sad': 'confusion',
-            'happy': 'happy',
-            'surprise': 'surprise',
-            'neutral': 'neutral',
-            'focused': 'happy',  # Treat focused as happy
-            'bored': 'boredom',
-            'confused': 'confusion',
-            'frustrated': 'frustration',
-            'sleepy': 'sleepy'
-        }
+        attentive = (
+            1.0 * emotions.get("focus", 0.0) +
+            0.9 * emotions.get("happy", 0.0) +
+            0.7 * emotions.get("surprise", 0.0) +
+            0.4 * emotions.get("neutral", 0.0)
+        )
         
-        # Calculate probabilities for attentive and inattentive
-        attentive_sum = 0.0
-        inattentive_sum = 0.0
+        inattentive = (
+            1.0 * emotions.get("sleepy", 0.0) +
+            0.9 * emotions.get("boredom", 0.0) +
+            0.85 * emotions.get("frustration", 0.0) +
+            0.85 * emotions.get("confusion", 0.0)
+        )
         
-        for emotion, prob in emotions.items():
-            mapped_emotion = emotion_mapping.get(emotion.lower(), emotion.lower())
-            
-            if mapped_emotion in attentive_emotions:
-                attentive_sum += prob
-            elif mapped_emotion in inattentive_emotions:
-                inattentive_sum += prob
+        total = attentive + inattentive
+        if total == 0:
+            return 0.0
         
-        # Calculate concentration score
-        total = attentive_sum + inattentive_sum
-        if total > 0:
-            concentration = (attentive_sum / total) * 100.0
-        else:
-            # If no emotions match categories, default to neutral (50%)
-            concentration = 50.0
-        
-        return max(0.0, min(100.0, concentration))
+        return round((attentive / total) * 100, 2)
     
     def _calculate_engagement(self, emotions: Dict[str, float], dominant: str) -> float:
         """
@@ -1472,9 +965,9 @@ class ModelService:
         Higher score = more engaged
         This is a legacy method, concentration_score should be used instead
         """
-        # Positive emotions increase engagement
-        positive_emotions = ['happy', 'surprise']
-        negative_emotions = ['sad', 'angry', 'fear', 'disgust']
+        # Map 8-emotion system to engagement categories
+        positive_emotions = ['happy', 'surprise', 'focus']
+        negative_emotions = ['frustration', 'confusion', 'boredom', 'sleepy']
         neutral_emotions = ['neutral']
         
         if dominant in positive_emotions:
@@ -1492,16 +985,17 @@ class ModelService:
     
     def map_emotion_to_state(self, emotion: str) -> str:
         """
-        Map detected emotion to engagement state
+        Map detected emotion to engagement state (8-emotion system)
         """
         emotion_mapping = {
+            'focus': 'focused',
             'happy': 'focused',
             'surprise': 'focused',
             'neutral': 'neutral',
-            'sad': 'confused',
-            'fear': 'confused',
-            'angry': 'frustrated',
-            'disgust': 'bored'
+            'confusion': 'confused',
+            'frustration': 'frustrated',
+            'boredom': 'bored',
+            'sleepy': 'bored'
         }
         return emotion_mapping.get(emotion, 'neutral')
 

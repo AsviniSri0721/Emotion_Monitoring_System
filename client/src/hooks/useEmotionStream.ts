@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../services/api';
+import { averageEmotions, calculateConcentration, getMaxEmotion, SMOOTHING_WINDOW } from '../utils/emotionUtils';
+import { deriveLearningState, INTERVENTION_STATES, LearningState, REQUIRED_PERSISTENCE_FRAMES } from '../utils/learningStates';
 
 export interface EmotionStreamResult {
   emotion: string;
@@ -9,6 +11,7 @@ export interface EmotionStreamResult {
   allEmotions?: Record<string, number>;
   timestamp: number;
   bbox?: number[]; // [x1, y1, x2, y2] bounding box coordinates
+  learningState?: LearningState; // Current learning state derived from concentration and emotions
 }
 
 interface UseEmotionStreamOptions {
@@ -36,24 +39,15 @@ export const useEmotionStream = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const intervalRef = useRef<number | null>(null);
   const timestampRef = useRef<number>(0);
-  const lowScoreCountRef = useRef<number>(0);
   const isDetectingRef = useRef<boolean>(false);
   const previousImageHashRef = useRef<string | null>(null);
   const previousEmotionResultRef = useRef<EmotionStreamResult | null>(null);
   const previousVideoTimeRef = useRef<number | null>(null);
-
-  // Check if intervention should be triggered
-  const checkIntervention = useCallback(async () => {
-    try {
-      const response = await api.get(`/interventions/check/${sessionType}/${sessionId}`);
-      if (response.data.should_trigger) {
-        setShouldTriggerIntervention(true);
-        setConsecutiveLowScores(response.data.consecutive_low);
-      }
-    } catch (err) {
-      console.error('Error checking intervention:', err);
-    }
-  }, [sessionType, sessionId]);
+  const emotionBufferRef = useRef<Record<string, number>[]>([]);
+  
+  // Learning state tracking with temporal persistence
+  const learningStateRef = useRef<LearningState | null>(null);
+  const stateCounterRef = useRef<number>(0);
 
   // Capture frame and send to backend
   const captureAndDetect = useCallback(async () => {
@@ -200,18 +194,43 @@ export const useEmotionStream = ({
         bboxLength: response.data.bbox?.length
       });
 
-      if (response.data.emotion) {
+      if (response.data.emotion || response.data.emotions || response.data.probs) {
         // Clear any previous errors on successful detection
         setError(null);
         
+        // Get raw emotion probabilities from API
+        const rawEmotions = response.data.emotions || response.data.all_emotions || response.data.probs || {};
+        
+        // Apply temporal smoothing
+        emotionBufferRef.current.push(rawEmotions);
+        if (emotionBufferRef.current.length > SMOOTHING_WINDOW) {
+          emotionBufferRef.current.shift();
+        }
+        
+        // Calculate smoothed emotions
+        const smoothedEmotions = averageEmotions(emotionBufferRef.current);
+        
+        // Compute concentration from smoothed emotions (frontend calculation)
+        const concentrationScore = calculateConcentration(smoothedEmotions);
+        
+        // Get dominant emotion from smoothed emotions
+        const dominantEmotion = getMaxEmotion(smoothedEmotions);
+        
+        // Use original confidence from API
+        const confidence = response.data.confidence || 0.0;
+        
+        // Derive learning state (will be used for persistence tracking)
+        const currentState = deriveLearningState(concentrationScore, smoothedEmotions);
+        
         const result: EmotionStreamResult = {
-          emotion: response.data.emotion,
-          confidence: response.data.confidence,
-          concentrationScore: response.data.concentration_score || 50.0,
-          dominantEmotion: response.data.dominant_emotion,
-          allEmotions: response.data.all_emotions,
+          emotion: dominantEmotion,
+          confidence: confidence,
+          concentrationScore: concentrationScore,
+          dominantEmotion: dominantEmotion,
+          allEmotions: smoothedEmotions, // Use smoothed emotions for UI
           timestamp: response.data.timestamp || timestampRef.current,
           bbox: response.data.bbox,
+          learningState: currentState, // Include learning state in result
         };
 
         // Log before setting state to verify new data
@@ -221,6 +240,7 @@ export const useEmotionStream = ({
           confidence: result.confidence,
           bbox: result.bbox,
           timestamp: result.timestamp,
+          smoothedEmotions: smoothedEmotions,
           previousEmotion: previousEmotionResultRef.current?.emotion,
           previousConcentration: previousEmotionResultRef.current?.concentrationScore,
           previousConfidence: previousEmotionResultRef.current?.confidence,
@@ -235,21 +255,29 @@ export const useEmotionStream = ({
         // Update ref with new result for next comparison
         previousEmotionResultRef.current = result;
 
-        // Track consecutive low concentration scores
-        if (result.concentrationScore <= 50) {
-          lowScoreCountRef.current += 1;
-          if (lowScoreCountRef.current >= 15) {
-            setShouldTriggerIntervention(true);
-            setConsecutiveLowScores(lowScoreCountRef.current);
-          }
+        // Track temporal persistence of learning state
+        if (currentState === learningStateRef.current) {
+          // State persists, increment counter
+          stateCounterRef.current += 1;
         } else {
-          lowScoreCountRef.current = 0;
-          setShouldTriggerIntervention(false);
+          // State changed, reset counter
+          stateCounterRef.current = 1;
+          learningStateRef.current = currentState;
         }
-
-        // Check intervention status from backend (every 5 frames)
-        if (timestampRef.current % 5 === 0) {
-          checkIntervention();
+        
+        // Trigger intervention only for harmful states that have persisted
+        if (
+          INTERVENTION_STATES.includes(currentState) &&
+          stateCounterRef.current >= REQUIRED_PERSISTENCE_FRAMES
+        ) {
+          setShouldTriggerIntervention(true);
+          setConsecutiveLowScores(stateCounterRef.current);
+        } else {
+          // Reset intervention trigger if state improves or hasn't persisted long enough
+          setShouldTriggerIntervention(false);
+          if (!INTERVENTION_STATES.includes(currentState)) {
+            setConsecutiveLowScores(0);
+          }
         }
 
         timestampRef.current += 1;
@@ -258,7 +286,7 @@ export const useEmotionStream = ({
       console.error('Emotion detection error:', err);
       setError(err?.response?.data?.error || 'Failed to detect emotions');
     }
-  }, [videoElement, sessionType, sessionId, checkIntervention]);
+  }, [videoElement, sessionType, sessionId]);
 
   // Start detection
   const startDetection = useCallback(async () => {
@@ -314,7 +342,6 @@ export const useEmotionStream = ({
       isDetectingRef.current = true; // Set ref immediately
       setError(null);
       timestampRef.current = 0;
-      lowScoreCountRef.current = 0;
       previousImageHashRef.current = null; // Reset frame hash
 
       console.log('[EmotionStream] Webcam accessed, starting periodic detection...');
@@ -358,7 +385,9 @@ export const useEmotionStream = ({
     isDetectingRef.current = false; // Clear ref immediately
     setShouldTriggerIntervention(false);
     setConsecutiveLowScores(0);
-    lowScoreCountRef.current = 0;
+    emotionBufferRef.current = []; // Clear emotion buffer
+    learningStateRef.current = null; // Reset learning state
+    stateCounterRef.current = 0; // Reset state counter
 
     if (intervalRef.current) {
       clearTimeout(intervalRef.current);

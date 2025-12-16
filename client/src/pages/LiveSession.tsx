@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { liveSessionsApi } from '../api/liveSessions';
 import EngagementMeter from '../components/EngagementMeter';
 import { useAuth } from '../contexts/AuthContext';
 import { useLiveSessionEmotionStream } from '../hooks/useLiveSessionEmotionStream';
-import { liveSessionsApi } from '../api/liveSessions';
 import api from '../services/api';
 import './LiveSession.css';
 
@@ -224,35 +224,63 @@ const LiveSession: React.FC = () => {
               />
               <div className="emotion-details">
                 <p className="confidence">Confidence: {(emotionResult.confidence * 100).toFixed(1)}%</p>
+                {emotionResult.emotion && (
+                  <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.25rem' }}>
+                    Dominant Emotion: {emotionResult.emotion}
+                  </p>
+                )}
                 <p className="timestamp">Time: {emotionResult.timestamp}s</p>
               </div>
               
               {emotionResult.allEmotions && (
                 <div className="all-emotions-display" style={{ marginTop: '1rem', padding: '1rem', background: '#f9f9f9', borderRadius: '8px' }}>
-                  <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: '#666' }}>All Emotions:</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem', fontSize: '0.85rem' }}>
+                  <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: '#666' }}>Emotion Levels:</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     {Object.entries(emotionResult.allEmotions)
                       .sort(([, a], [, b]) => b - a) // Sort by probability descending
-                      .map(([emotion, probability]) => (
+                      .map(([emotion, value]) => {
+                        // Ensure value is a number (handle undefined/null)
+                        const emotionValue = typeof value === 'number' ? value : 0;
+                        return (
                         <div 
                           key={emotion} 
+                          className="emotion-row"
                           style={{ 
                             display: 'flex', 
-                            justifyContent: 'space-between',
-                            padding: '0.25rem 0.5rem',
-                            background: emotion === emotionResult.emotion ? '#e3f2fd' : 'white',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.5rem',
+                            background: 'white',
                             borderRadius: '4px',
-                            border: emotion === emotionResult.emotion ? '1px solid #2196f3' : '1px solid #e0e0e0'
+                            border: '1px solid #e0e0e0'
                           }}
                         >
-                          <span style={{ textTransform: 'capitalize', fontWeight: emotion === emotionResult.emotion ? 'bold' : 'normal' }}>
+                          <span 
+                            className="emotion-label"
+                            style={{ 
+                              textTransform: 'capitalize', 
+                              fontWeight: '500',
+                              minWidth: '100px',
+                              fontSize: '0.85rem'
+                            }}
+                          >
                             {emotion}:
                           </span>
-                          <span style={{ color: '#666', fontWeight: 'bold' }}>
-                            {(probability * 100).toFixed(1)}%
+                          <progress 
+                            value={emotionValue * 100} 
+                            max="100" 
+                            style={{ 
+                              flex: 1,
+                              height: '20px',
+                              borderRadius: '4px'
+                            }}
+                          />
+                          <span style={{ color: '#666', fontWeight: 'bold', minWidth: '45px', textAlign: 'right', fontSize: '0.85rem' }}>
+                            {Math.round(emotionValue * 100)}%
                           </span>
                         </div>
-                      ))}
+                      );
+                      })}
                   </div>
                 </div>
               )}

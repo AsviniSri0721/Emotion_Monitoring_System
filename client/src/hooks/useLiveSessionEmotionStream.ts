@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { liveSessionsApi, LiveSessionStreamResponse } from '../api/liveSessions';
+import { averageEmotions, calculateConcentration, getMaxEmotion, SMOOTHING_WINDOW } from '../utils/emotionUtils';
 
 export interface LiveEmotionStreamResult {
   emotion: string;
@@ -35,6 +36,7 @@ export const useLiveSessionEmotionStream = ({
   const isDetectingRef = useRef<boolean>(false);
   const previousImageHashRef = useRef<string | null>(null);
   const startTimeRef = useRef<number | null>(null);
+  const emotionBufferRef = useRef<Record<string, number>[]>([]);
 
   // Capture frame and send to backend (NO intervention checks)
   const captureAndDetect = useCallback(async () => {
@@ -110,15 +112,33 @@ export const useLiveSessionEmotionStream = ({
         timestamp: currentTimestamp,
       });
 
-      // Update state with result
+      // Get raw emotion probabilities from API
+      const rawEmotions = (response as any).emotions || (response as any).probs || {};
+      
+      // Apply temporal smoothing
+      emotionBufferRef.current.push(rawEmotions);
+      if (emotionBufferRef.current.length > SMOOTHING_WINDOW) {
+        emotionBufferRef.current.shift();
+      }
+      
+      // Calculate smoothed emotions
+      const smoothedEmotions = averageEmotions(emotionBufferRef.current);
+      
+      // Compute concentration from smoothed emotions (frontend calculation)
+      const concentrationScore = calculateConcentration(smoothedEmotions);
+      
+      // Get dominant emotion from smoothed emotions
+      const dominantEmotion = getMaxEmotion(smoothedEmotions);
+      
+      // Update state with result - use smoothed emotions and computed concentration
       setEmotionResult({
-        emotion: response.emotion,
-        confidence: response.confidence,
-        concentrationScore: response.concentration_score,
+        emotion: dominantEmotion,
+        confidence: response.confidence || 0.0,
+        concentrationScore: concentrationScore,
         engagementScore: response.engagement_score,
         timestamp: response.timestamp,
         bbox: response.bbox,
-        allEmotions: (response as any).probs,
+        allEmotions: smoothedEmotions, // Use smoothed emotions for UI
       });
 
       timestampRef.current = currentTimestamp;
@@ -179,6 +199,7 @@ export const useLiveSessionEmotionStream = ({
   // Stop detection
   const stopDetection = useCallback(() => {
     isDetectingRef.current = false;
+    emotionBufferRef.current = []; // Clear emotion buffer
     setIsDetecting(false);
 
     if (intervalRef.current) {
@@ -220,6 +241,7 @@ export const useLiveSessionEmotionStream = ({
     stopDetection,
   };
 };
+
 
 
 

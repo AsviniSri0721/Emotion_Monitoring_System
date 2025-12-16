@@ -3,8 +3,16 @@ import './EngagementMeter.css';
 
 interface EngagementMeterProps {
   score: number; // 0-100 concentration score
-  emotion: string;
+  emotion?: string; // Optional: dominant emotion (secondary display)
   size?: number; // Size of the circular meter in pixels
+}
+
+// Helper function to get concentration label based on score
+function getConcentrationLabel(score: number): string {
+  if (score < 20) return "Disengaged";
+  if (score < 50) return "Low Attention";
+  if (score < 80) return "Focused";
+  return "Highly Engaged";
 }
 
 const EngagementMeter: React.FC<EngagementMeterProps> = ({
@@ -14,6 +22,7 @@ const EngagementMeter: React.FC<EngagementMeterProps> = ({
 }) => {
   // Log when component renders to verify updates
   console.log('[EngagementMeter] Rendering with:', { score, emotion, timestamp: Date.now() });
+  
   // Determine color based on score
   const getColor = (score: number): string => {
     if (score >= 70) return '#4caf50'; // Green - high concentration
@@ -21,24 +30,11 @@ const EngagementMeter: React.FC<EngagementMeterProps> = ({
     return '#f44336'; // Red - low concentration
   };
 
-  // Map emotion to display text
-  const getEmotionLabel = (emotion: string): string => {
-    const emotionMap: Record<string, string> = {
-      focused: 'Focused',
-      happy: 'Happy',
-      neutral: 'Neutral',
-      confused: 'Confused',
-      frustrated: 'Frustrated',
-      bored: 'Bored',
-      sleepy: 'Sleepy',
-    };
-    return emotionMap[emotion] || emotion.charAt(0).toUpperCase() + emotion.slice(1);
-  };
-
   const color = getColor(score);
   const radius = (size - 20) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (score / 100) * circumference;
+  const concentrationLabel = getConcentrationLabel(score);
 
   return (
     <div className="engagement-meter" style={{ width: size, height: size }}>
@@ -71,7 +67,12 @@ const EngagementMeter: React.FC<EngagementMeterProps> = ({
         <div className="engagement-meter-score" style={{ color }}>
           {Math.round(score)}%
         </div>
-        <div className="engagement-meter-emotion">{getEmotionLabel(emotion)}</div>
+        <div className="engagement-meter-emotion">{concentrationLabel}</div>
+        {emotion && (
+          <div style={{ fontSize: '0.7rem', color: '#666', marginTop: '0.25rem' }}>
+            {emotion}
+          </div>
+        )}
       </div>
     </div>
   );
