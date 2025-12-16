@@ -2,6 +2,7 @@ import React from 'react';
 import { Navigate, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
 import './App.css';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import LiveMonitoring from './pages/LiveMonitoring';
 import LiveSession from './pages/LiveSession';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -113,6 +114,15 @@ function App() {
             element={
               <PrivateRoute allowedRoles={['student', 'teacher']}>
                 <LiveSession />
+              </PrivateRoute>
+            }
+          />
+          
+          <Route
+            path="/monitoring/live/:id"
+            element={
+              <PrivateRoute allowedRoles={['student']}>
+                <LiveMonitoring />
               </PrivateRoute>
             }
           />

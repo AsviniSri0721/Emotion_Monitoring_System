@@ -49,9 +49,11 @@ export function deriveLearningState(
   }
 
   // Low concentration with boredom = disengaged
+  // BUT: Require higher boredom threshold and lower concentration to avoid false positives
+  // This prevents single-frame boredom spikes from triggering disengagement
   if (
     concentration < 40 &&
-    (emotions.boredom || 0) > 0.2
+    (emotions.boredom || 0) > 0.5  // Increased threshold from 0.2 to 0.5
   ) {
     return "DISENGAGED";
   }

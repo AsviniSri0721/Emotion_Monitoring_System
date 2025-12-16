@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { liveSessionsApi, LiveSessionStreamResponse } from '../api/liveSessions';
 import { averageEmotions, calculateConcentration, getMaxEmotion, SMOOTHING_WINDOW } from '../utils/emotionUtils';
+import { hashFrame, shouldSendFrame } from '../utils/frameUtils';
 
 export interface LiveEmotionStreamResult {
   emotion: string;
@@ -37,10 +38,17 @@ export const useLiveSessionEmotionStream = ({
   const previousImageHashRef = useRef<string | null>(null);
   const startTimeRef = useRef<number | null>(null);
   const emotionBufferRef = useRef<Record<string, number>[]>([]);
+  
+  // Track stable frames for boredom reduction
+  const stableFrameCountRef = useRef<number>(0);
+  const previousEmotionHashRef = useRef<string | null>(null);
 
   // Capture frame and send to backend (NO intervention checks)
   const captureAndDetect = useCallback(async () => {
-    if (!videoElement || !sessionId || !isDetectingRef.current) {
+    // Get current video element (handle case where it's a ref or direct element)
+    const currentVideoElement = (videoElement as any)?.current || videoElement;
+    
+    if (!currentVideoElement || !sessionId || !isDetectingRef.current) {
       return;
     }
 
@@ -57,13 +65,13 @@ export const useLiveSessionEmotionStream = ({
       if (!ctx) return;
 
       // Ensure video is ready
-      if (videoElement.readyState < 2) {
+      if (currentVideoElement.readyState < 2) {
         return;
       }
 
-      if (videoElement.paused) {
+      if (currentVideoElement.paused) {
         try {
-          await videoElement.play();
+          await currentVideoElement.play();
         } catch (e) {
           console.error('[LiveEmotionStream] Cannot play video:', e);
           return;
@@ -71,9 +79,9 @@ export const useLiveSessionEmotionStream = ({
       }
 
       // Wait for next frame
-      if ('requestVideoFrameCallback' in videoElement) {
+      if ('requestVideoFrameCallback' in currentVideoElement) {
         await new Promise<void>((resolve) => {
-          (videoElement as any).requestVideoFrameCallback(() => {
+          (currentVideoElement as any).requestVideoFrameCallback(() => {
             resolve();
           });
         });
@@ -88,17 +96,21 @@ export const useLiveSessionEmotionStream = ({
       }
 
       // Draw the current video frame
-      ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(currentVideoElement, 0, 0, canvas.width, canvas.height);
 
-      // Get image data
-      const imageData = canvas.toDataURL('image/jpeg', 0.8);
-      const imageHash = imageData.substring(20, 50);
+      // Get image data for hashing (before converting to base64)
+      const frameImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const frameHash = hashFrame(frameImageData);
 
-      // Check for duplicate frames
-      if (previousImageHashRef.current === imageHash && previousImageHashRef.current !== null) {
-        console.warn('[LiveEmotionStream] Duplicate frame detected');
+      // Skip duplicate frames BEFORE sending to backend
+      if (!shouldSendFrame(frameHash, previousImageHashRef.current)) {
+        console.log('[LiveEmotionStream] Skipping duplicate frame');
+        return; // Don't send duplicate frame
       }
-      previousImageHashRef.current = imageHash;
+      previousImageHashRef.current = frameHash;
+
+      // Convert to base64 for API (only for non-duplicate frames)
+      const imageData = canvas.toDataURL('image/jpeg', 0.8);
 
       // Calculate timestamp (seconds from session start)
       if (!startTimeRef.current) {
@@ -115,6 +127,15 @@ export const useLiveSessionEmotionStream = ({
       // Get raw emotion probabilities from API
       const rawEmotions = (response as any).emotions || (response as any).probs || {};
       
+      // Check if emotions are stable (unchanged)
+      const emotionHash = JSON.stringify(rawEmotions);
+      if (emotionHash === previousEmotionHashRef.current) {
+        stableFrameCountRef.current += 1;
+      } else {
+        stableFrameCountRef.current = 0;
+        previousEmotionHashRef.current = emotionHash;
+      }
+      
       // Apply temporal smoothing
       emotionBufferRef.current.push(rawEmotions);
       if (emotionBufferRef.current.length > SMOOTHING_WINDOW) {
@@ -122,7 +143,16 @@ export const useLiveSessionEmotionStream = ({
       }
       
       // Calculate smoothed emotions
-      const smoothedEmotions = averageEmotions(emotionBufferRef.current);
+      let smoothedEmotions = averageEmotions(emotionBufferRef.current);
+      
+      // Reduce boredom weight during stable frames (if emotions unchanged for 8+ frames)
+      if (stableFrameCountRef.current > 8 && smoothedEmotions.boredom) {
+        smoothedEmotions = {
+          ...smoothedEmotions,
+          boredom: smoothedEmotions.boredom * 0.7
+        };
+        console.log(`[LiveEmotionStream] Reduced boredom weight (stable frames: ${stableFrameCountRef.current})`);
+      }
       
       // Compute concentration from smoothed emotions (frontend calculation)
       const concentrationScore = calculateConcentration(smoothedEmotions);
@@ -151,21 +181,35 @@ export const useLiveSessionEmotionStream = ({
 
   // Start detection
   const startDetection = useCallback(async () => {
-    if (!videoElement || !sessionId) {
+    // Get current video element (handle case where it's a ref or direct element)
+    const currentVideoElement = (videoElement as any)?.current || videoElement;
+    
+    if (!currentVideoElement || !sessionId) {
       setError('Video element or session ID missing');
+      console.error('[LiveEmotionStream] Start detection failed:', {
+        hasVideoElement: !!currentVideoElement,
+        sessionId: sessionId,
+        videoElementType: typeof videoElement,
+        videoElementValue: videoElement
+      });
       return;
     }
 
     try {
-      // Get user media if needed
+      // Get user media if needed (only if stream not already set)
       if (!streamRef.current) {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480 },
-          audio: false,
-        });
-        streamRef.current = stream;
-        videoElement.srcObject = stream;
-        await videoElement.play();
+        // Check if video element already has a stream
+        if (currentVideoElement.srcObject) {
+          streamRef.current = currentVideoElement.srcObject as MediaStream;
+        } else {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 640, height: 480 },
+            audio: false,
+          });
+          streamRef.current = stream;
+          currentVideoElement.srcObject = stream;
+          await currentVideoElement.play();
+        }
       }
 
       // Reset timestamp
@@ -200,6 +244,9 @@ export const useLiveSessionEmotionStream = ({
   const stopDetection = useCallback(() => {
     isDetectingRef.current = false;
     emotionBufferRef.current = []; // Clear emotion buffer
+    previousImageHashRef.current = null; // Reset frame hash
+    stableFrameCountRef.current = 0; // Reset stable frame count
+    previousEmotionHashRef.current = null; // Reset emotion hash
     setIsDetecting(false);
 
     if (intervalRef.current) {

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { LiveSession, liveSessionsApi } from '../api/liveSessions';
 import { useAuth } from '../contexts/AuthContext';
-import { liveSessionsApi, LiveSession } from '../api/liveSessions';
 import api from '../services/api';
 import './Dashboard.css';
 
@@ -165,10 +165,20 @@ const TeacherDashboard: React.FC = () => {
 
   const endSession = async (sessionId: string) => {
     try {
-      await api.post(`/sessions/live/${sessionId}/end`);
+      const response = await api.post(`/sessions/live/${sessionId}/end`);
       fetchSessions();
+      // Refresh reports after ending session to show newly generated reports
+      fetchReports();
+      // Show success message with report count
+      const reportsGenerated = response.data.reports_generated || 0;
+      if (reportsGenerated > 0) {
+        alert(`Session ended successfully. ${reportsGenerated} engagement report(s) generated.`);
+      } else {
+        alert('Session ended successfully. No emotion data was recorded for this session.');
+      }
     } catch (error) {
       console.error('Error ending session:', error);
+      alert('Failed to end session. Please try again.');
     }
   };
 
@@ -266,7 +276,10 @@ const TeacherDashboard: React.FC = () => {
 
         {activeTab === 'reports' && (
           <div>
-            <h2>Engagement Reports</h2>
+            <h2>Engagement Reports (Live Sessions Only)</h2>
+            <p style={{ color: '#666', marginBottom: '1rem', fontSize: '0.9rem' }}>
+              Reports are generated from real-time student monitoring during live classes. Recorded content is excluded to ensure accuracy and ethical data usage.
+            </p>
             <div className="table-container">
               <table>
                 <thead>

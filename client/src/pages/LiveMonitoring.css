@@ -1,0 +1,89 @@
+.live-monitoring-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.live-monitoring-header {
+  margin-bottom: 2rem;
+  text-align: center;
+}
+
+.live-monitoring-header h1 {
+  margin: 0 0 0.5rem 0;
+  color: #333;
+}
+
+.live-monitoring-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+}
+
+.webcam-section {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.webcam-container {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+}
+
+.emotion-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  max-width: 500px;
+}
+
+.emotion-details {
+  text-align: center;
+}
+
+.emotion-details .confidence {
+  font-size: 1rem;
+  font-weight: 500;
+  color: #333;
+  margin: 0.5rem 0;
+}
+
+.emotion-details .timestamp {
+  font-size: 0.85rem;
+  color: #666;
+  margin: 0.25rem 0;
+}
+
+.all-emotions-display {
+  width: 100%;
+}
+
+.error-message {
+  padding: 1rem;
+  background: #fee;
+  border: 1px solid #fcc;
+  border-radius: 8px;
+  color: #c00;
+}
+
+.loading {
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+}
+
+@media (max-width: 768px) {
+  .live-monitoring-container {
+    padding: 1rem;
+  }
+  
+  .live-monitoring-content {
+    gap: 1rem;
+  }
+}
+

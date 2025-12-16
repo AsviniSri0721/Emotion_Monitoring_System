@@ -1,20 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-    CartesianGrid,
-    Cell,
-    Legend,
-    Line,
-    LineChart,
-    Pie,
-    PieChart,
-    ResponsiveContainer,
-    Tooltip,
-    XAxis,
-    YAxis,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
-import { useAuth } from '../contexts/AuthContext';
 import { liveSessionsApi } from '../api/liveSessions';
+import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import './ReportPage.css';
 
@@ -35,6 +35,15 @@ interface ConcentrationAnalysis {
   events: ConcentrationEvent[];
 }
 
+interface EmotionSegment {
+  emotion: string;
+  start_timestamp: number;
+  end_timestamp: number;
+  start_time: string;
+  end_time: string;
+  duration_seconds: number;
+}
+
 interface ReportData {
   id: string;
   overall_engagement: number;
@@ -53,6 +62,7 @@ interface ReportData {
     engagement_score: number;
   }>;
   concentration_analysis?: ConcentrationAnalysis;
+  emotion_segments?: EmotionSegment[];
 }
 
 const ReportPage: React.FC = () => {
@@ -108,11 +118,10 @@ const ReportPage: React.FC = () => {
           setReport(reportResponse.data.report);
         }
       } else {
-        // Recorded session - use existing endpoint
-        const response = await api.post(`/reports/generate/${sessionType}/${sessionId}`, {
-          studentId: user?.id,
-        });
-        setReport(response.data.report);
+        // Recorded session - report generation not available
+        setError('Engagement reports are available only for live monitored sessions. Recorded videos are excluded to ensure accuracy and ethical data usage.');
+        setLoading(false);
+        return;
       }
       setError(null);
     } catch (err: any) {
@@ -358,6 +367,90 @@ const ReportPage: React.FC = () => {
                       </td>
                     </tr>
                   ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Emotion Segments Timeline */}
+        {report.emotion_segments && report.emotion_segments.length > 0 && (
+          <div className="report-details">
+            <h2>Emotion Timeline Segments</h2>
+            <p style={{ color: '#666', marginBottom: '1rem', fontSize: '0.9rem' }}>
+              Exact timestamps and durations for each emotion state during the session.
+            </p>
+            <div className="table-container">
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '2px solid #ddd', backgroundColor: '#f5f5f5' }}>
+                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Emotion</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Start Time</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>End Time</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'left' }}>Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.emotion_segments.map((segment, index) => {
+                    const getEmotionColor = (emotion: string) => {
+                      switch (emotion.toLowerCase()) {
+                        case 'focused':
+                          return '#4caf50';
+                        case 'bored':
+                          return '#ff9800';
+                        case 'confused':
+                          return '#f44336';
+                        case 'sleepy':
+                          return '#9e9e9e';
+                        case 'neutral':
+                          return '#2196f3';
+                        case 'frustrated':
+                          return '#e91e63';
+                        default:
+                          return '#666';
+                      }
+                    };
+
+                    const formatDuration = (seconds: number) => {
+                      if (seconds < 60) {
+                        return `${seconds}s`;
+                      } else if (seconds < 3600) {
+                        const mins = Math.floor(seconds / 60);
+                        const secs = seconds % 60;
+                        return `${mins}m ${secs}s`;
+                      } else {
+                        const hours = Math.floor(seconds / 3600);
+                        const mins = Math.floor((seconds % 3600) / 60);
+                        const secs = seconds % 60;
+                        return `${hours}h ${mins}m ${secs}s`;
+                      }
+                    };
+
+                    return (
+                      <tr key={index} style={{ borderBottom: '1px solid #eee' }}>
+                        <td style={{ padding: '0.75rem' }}>
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '0.25rem 0.5rem',
+                              borderRadius: '4px',
+                              backgroundColor: getEmotionColor(segment.emotion),
+                              color: 'white',
+                              fontWeight: 'bold',
+                              textTransform: 'capitalize',
+                            }}
+                          >
+                            {segment.emotion}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.75rem' }}>{segment.start_time}</td>
+                        <td style={{ padding: '0.75rem' }}>{segment.end_time}</td>
+                        <td style={{ padding: '0.75rem', fontWeight: 'bold' }}>
+                          {formatDuration(segment.duration_seconds)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

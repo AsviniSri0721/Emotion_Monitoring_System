@@ -212,7 +212,7 @@ def start_live_session(session_id):
 @bp.route('/live/<session_id>/end', methods=['POST'])
 @jwt_required()
 def end_live_session(session_id):
-    """End a live session (change status to 'ended')"""
+    """End a live session and generate engagement reports"""
     try:
         current_user = get_current_user()
         if current_user['role'] != 'teacher':
@@ -226,9 +226,21 @@ def end_live_session(session_id):
             (session_id, current_user['id'])
         )
         
-        return jsonify({'message': 'Session ended successfully'}), 200
+        # Generate engagement reports for all students in this session
+        from live_sessions.service import LiveSessionService
+        report_result = LiveSessionService.generate_engagement_reports(session_id)
+        
+        logger.info(f"Session {session_id} ended. {report_result.get('reports_generated', 0)} report(s) generated.")
+        
+        return jsonify({
+            'message': 'Session ended successfully',
+            'reports_generated': report_result.get('reports_generated', 0),
+            'report_message': report_result.get('message', '')
+        }), 200
         
     except Exception as e:
         logger.error(f"End session error: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': 'Failed to end session'}), 500
 

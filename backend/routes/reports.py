@@ -26,7 +26,8 @@ def get_all_reports():
             logger.error(f"Invalid user data from token: {current_user}")
             return jsonify({'error': 'Invalid token payload'}), 422
         
-        # Teachers see reports for all their sessions, students see their own reports
+        # Teachers see reports for all their LIVE sessions only, students see their own LIVE reports only
+        # Engagement reports are generated exclusively from live sessions where real-time monitoring is active
         if current_user['role'] == 'teacher':
             reports = execute_query(
                 """SELECT er.id, er.session_type, er.session_id, er.student_id,
@@ -34,40 +35,30 @@ def get_all_reports():
                           er.focus_percentage, er.boredom_percentage, er.confusion_percentage,
                           er.sleepiness_percentage, er.generated_at,
                           CONCAT(u.first_name, ' ', u.last_name) as student_name,
-                          CASE 
-                              WHEN er.session_type = 'live' THEN ls.title
-                              WHEN er.session_type = 'recorded' THEN v.title
-                              ELSE 'Unknown'
-                          END as session_title
+                          ls.title as session_title
                    FROM engagement_reports er
                    JOIN users u ON er.student_id = u.id
-                   LEFT JOIN live_sessions ls ON er.session_type = 'live' AND er.session_id = ls.id
-                   LEFT JOIN videos v ON er.session_type = 'recorded' AND er.session_id = v.id
-                   WHERE (er.session_type = 'live' AND ls.teacher_id = %s)
-                      OR (er.session_type = 'recorded' AND v.teacher_id = %s)
+                   JOIN live_sessions ls ON er.session_type = 'live' AND er.session_id = ls.id
+                   WHERE er.session_type = 'live' AND ls.teacher_id = %s
                    ORDER BY er.generated_at DESC
                    LIMIT 50""",
-                (current_user['id'], current_user['id']),
+                (current_user['id'],),
                 fetch_all=True
             )
         else:
-            # Students see their own reports
+            # Students see their own LIVE reports only
             reports = execute_query(
                 """SELECT er.id, er.session_type, er.session_id, er.student_id,
                           er.overall_engagement, er.average_emotion, er.engagement_drops,
                           er.focus_percentage, er.boredom_percentage, er.confusion_percentage,
                           er.sleepiness_percentage, er.generated_at,
                           CONCAT(u.first_name, ' ', u.last_name) as student_name,
-                          CASE 
-                              WHEN er.session_type = 'live' THEN ls.title
-                              WHEN er.session_type = 'recorded' THEN v.title
-                              ELSE 'Unknown'
-                          END as session_title
+                          ls.title as session_title,
+                          er.emotion_segments
                    FROM engagement_reports er
                    JOIN users u ON er.student_id = u.id
-                   LEFT JOIN live_sessions ls ON er.session_type = 'live' AND er.session_id = ls.id
-                   LEFT JOIN videos v ON er.session_type = 'recorded' AND er.session_id = v.id
-                   WHERE er.student_id = %s
+                   JOIN live_sessions ls ON er.session_type = 'live' AND er.session_id = ls.id
+                   WHERE er.session_type = 'live' AND er.student_id = %s
                    ORDER BY er.generated_at DESC
                    LIMIT 50""",
                 (current_user['id'],),
@@ -77,7 +68,16 @@ def get_all_reports():
         # Convert to list of dicts
         report_list = []
         for row in reports:
-            report_list.append({
+            # Parse emotion_segments JSON if present
+            emotion_segments = None
+            if len(row) > 14 and row[14]:
+                try:
+                    import json
+                    emotion_segments = json.loads(row[14]) if isinstance(row[14], str) else row[14]
+                except:
+                    emotion_segments = None
+            
+            report_dict = {
                 'id': row[0],
                 'session_type': row[1],
                 'session_id': row[2],
@@ -92,7 +92,12 @@ def get_all_reports():
                 'generated_at': row[11].isoformat() if row[11] else None,
                 'student_name': row[12],
                 'session_title': row[13]
-            })
+            }
+            
+            if emotion_segments is not None:
+                report_dict['emotion_segments'] = emotion_segments
+            
+            report_list.append(report_dict)
         
         return jsonify({'reports': report_list}), 200
         
@@ -112,6 +117,16 @@ def generate_report(session_type, session_id):
         
         logger.info(f"Generating report for session_type={session_type}, session_id={session_id}, student_id={student_id}")
         
+        # Engagement reports are ONLY available for live sessions with real-time monitoring
+        if session_type != 'live':
+            logger.warning(f"Report generation attempted for non-live session: {session_type}")
+            return jsonify({
+                'error': 'Report generation not available',
+                'message': 'Engagement reports are available only for live monitored sessions. Recorded videos are excluded to ensure accuracy and ethical data usage.',
+                'session_type': session_type,
+                'session_id': session_id
+            }), 400
+        
         # For live sessions, use live_session_logs table instead of emotion_data
         if session_type == 'live':
             results = execute_query(
@@ -122,16 +137,15 @@ def generate_report(session_type, session_id):
                 (session_id, student_id),
                 fetch_all=True
             )
+        # Note: Recorded sessions are no longer supported for report generation
+        # This code path should not be reached due to the check above, but kept for safety
         else:
-            # For recorded sessions, use emotion_data table
-            results = execute_query(
-                """SELECT emotion, confidence, timestamp, engagement_score
-                   FROM emotion_data
-                   WHERE session_type = %s AND session_id = %s AND student_id = %s
-                   ORDER BY timestamp ASC""",
-                (session_type, session_id, student_id),
-                fetch_all=True
-            )
+            logger.error(f"Unexpected session_type in generate_report: {session_type}")
+            return jsonify({
+                'error': 'Report generation not available',
+                'message': 'Engagement reports are available only for live monitored sessions.',
+                'session_type': session_type
+            }), 400
         
         logger.info(f"Found {len(results) if results else 0} emotion data records")
         
@@ -151,13 +165,8 @@ def generate_report(session_type, session_id):
         timestamps = [row[2] for row in results]
         
         # For live sessions, concentration_score is already in the data (0-100)
-        # For recorded sessions, convert engagement_score (0-1) to concentration_score (0-100)
-        if session_type == 'live':
-            # Live sessions have concentration_score in column 4 (index 4)
-            concentration_scores = [float(row[4]) if len(row) > 4 and row[4] is not None else 50.0 for row in results]
-        else:
-            # Recorded sessions: convert engagement_score to concentration_score
-            concentration_scores = [score * 100.0 if score else 50.0 for score in engagement_scores]
+        # Live sessions have concentration_score in column 4 (index 4)
+        concentration_scores = [float(row[4]) if len(row) > 4 and row[4] is not None else 50.0 for row in results]
         
         emotion_counts = {}
         for emotion in emotions:
@@ -252,25 +261,22 @@ def generate_report(session_type, session_id):
         
         average_emotion = max(emotion_counts.items(), key=lambda x: x[1])[0] if emotion_counts else 'neutral'
         
-        # Check if report exists
+        # Check if report exists and get emotion_segments if available
         existing = execute_query(
-            """SELECT id FROM engagement_reports 
+            """SELECT id, emotion_segments FROM engagement_reports 
                WHERE session_type = %s AND session_id = %s AND student_id = %s""",
             (session_type, session_id, student_id),
             fetch_one=True
         )
         
         report_id = existing[0] if existing else generate_uuid_str()
+        existing_emotion_segments = existing[1] if existing and len(existing) > 1 else None
         
         # Create timeline with concentration data
         timeline_data = []
         for i, r in enumerate(results):
-            if session_type == 'live':
-                # Live sessions: concentration_score is in column 4
-                concentration = float(r[4]) if len(r) > 4 and r[4] is not None else 50.0
-            else:
-                # Recorded sessions: use calculated concentration
-                concentration = concentration_scores[i] if i < len(concentration_scores) else 50.0
+            # Live sessions: concentration_score is in column 4
+            concentration = float(r[4]) if len(r) > 4 and r[4] is not None else 50.0
             
             timeline_data.append({
                 'emotion': r[0],
@@ -324,21 +330,34 @@ def generate_report(session_type, session_id):
                  drops, focus_pct, boredom_pct, confusion_pct, sleepiness_pct, timeline_json, behavior_summary)
             )
         
+        # Parse emotion_segments if they exist in the database
+        emotion_segments = None
+        if existing_emotion_segments:
+            try:
+                emotion_segments = json.loads(existing_emotion_segments) if isinstance(existing_emotion_segments, str) else existing_emotion_segments
+            except:
+                emotion_segments = None
+        
+        report_data = {
+            'id': str(report_id),
+            'overall_engagement': float(overall_engagement),
+            'average_concentration': float(avg_concentration),
+            'average_emotion': average_emotion,
+            'engagement_drops': drops,
+            'concentration_drops': concentration_drops,
+            'focus_percentage': float(focus_pct),
+            'boredom_percentage': float(boredom_pct),
+            'confusion_percentage': float(confusion_pct),
+            'sleepiness_percentage': float(sleepiness_pct),
+            'timeline': timeline_data,
+            'concentration_analysis': concentration_analysis
+        }
+        
+        if emotion_segments:
+            report_data['emotion_segments'] = emotion_segments
+        
         return jsonify({
-            'report': {
-                'id': str(report_id),
-                'overall_engagement': float(overall_engagement),
-                'average_concentration': float(avg_concentration),
-                'average_emotion': average_emotion,
-                'engagement_drops': drops,
-                'concentration_drops': concentration_drops,
-                'focus_percentage': float(focus_pct),
-                'boredom_percentage': float(boredom_pct),
-                'confusion_percentage': float(confusion_pct),
-                'sleepiness_percentage': float(sleepiness_pct),
-                'timeline': timeline_data,
-                'concentration_analysis': concentration_analysis
-            }
+            'report': report_data
         }), 201
         
     except Exception as e:
