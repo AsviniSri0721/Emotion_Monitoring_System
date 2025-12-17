@@ -232,17 +232,26 @@ const VideoPlayer: React.FC = () => {
     resumeVideo();
   };
 
-  const startEmotionDetection = async () => {
+  const startEmotionDetection = async (): Promise<boolean> => {
     if (!webcamRef.current || !id) {
       console.log('[VideoPlayer] Cannot start emotion detection:', { 
         hasWebcam: !!webcamRef.current, 
         hasId: !!id 
       });
-      return;
+      return false;
     }
+
     console.log('[VideoPlayer] Starting emotion detection...');
     setEmotionDetectionEnabled(true);
-    await startDetection();
+
+    try {
+      await startDetection();
+      return true;
+    } catch (error) {
+      console.error('[VideoPlayer] Failed to start emotion detection:', error);
+      setEmotionDetectionEnabled(false);
+      return false;
+    }
   };
 
   const stopEmotionDetection = () => {
@@ -251,14 +260,23 @@ const VideoPlayer: React.FC = () => {
     stopDetection();
   };
 
-  const handlePlayPause = () => {
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause();
-      } else {
+  const handlePlayPause = async () => {
+    if (!videoRef.current) return;
+
+    if (isPlaying) {
+      // Pause video and stop monitoring
+      videoRef.current.pause();
+      stopEmotionDetection();
+      setIsPlaying(false);
+    } else {
+      // Try to start monitoring; only play video if camera access succeeds
+      const monitoringStarted = await startEmotionDetection();
+      if (monitoringStarted) {
         videoRef.current.play();
+        setIsPlaying(true);
+      } else {
+        console.warn('[VideoPlayer] Monitoring could not start; video will remain paused.');
       }
-      setIsPlaying(!isPlaying);
     }
   };
 
@@ -329,11 +347,7 @@ const VideoPlayer: React.FC = () => {
         <div className="emotion-section">
           <div className="emotion-controls">
             <h3>Emotion Monitoring</h3>
-            {!isDetecting ? (
-              <button className="btn btn-primary" onClick={startEmotionDetection}>
-                Start Monitoring
-              </button>
-            ) : (
+            {isDetecting && (
               <button className="btn btn-secondary" onClick={stopEmotionDetection}>
                 Stop Monitoring
               </button>

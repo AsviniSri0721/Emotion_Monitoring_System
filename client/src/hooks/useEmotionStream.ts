@@ -375,6 +375,8 @@ export const useEmotionStream = ({
       setError('Could not access webcam. Please allow camera permissions.');
       setIsDetecting(false);
       isDetectingRef.current = false;
+      // Propagate error so callers can react (e.g., block video playback)
+      throw err;
     }
   }, [videoElement, isDetecting, interval, captureAndDetect]);
 
