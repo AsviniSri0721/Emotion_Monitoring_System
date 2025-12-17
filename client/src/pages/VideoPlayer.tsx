@@ -347,11 +347,6 @@ const VideoPlayer: React.FC = () => {
         <div className="emotion-section">
           <div className="emotion-controls">
             <h3>Emotion Monitoring</h3>
-            {isDetecting && (
-              <button className="btn btn-secondary" onClick={stopEmotionDetection}>
-                Stop Monitoring
-              </button>
-            )}
           </div>
 
           {webcamRef && (
