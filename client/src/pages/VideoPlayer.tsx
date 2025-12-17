@@ -280,6 +280,16 @@ const VideoPlayer: React.FC = () => {
     }
   };
 
+  const handleVideoPause = () => {
+    setIsPlaying(false);
+    stopEmotionDetection();
+  };
+
+  const handleVideoEnded = () => {
+    setIsPlaying(false);
+    stopEmotionDetection();
+  };
+
   // Time update handler removed as currentTime is not used
 
   if (!video) {
@@ -333,7 +343,8 @@ const VideoPlayer: React.FC = () => {
               ref={videoRef}
               src={`${process.env.REACT_APP_API_URL?.replace('/api', '') || 'http://localhost:5000'}/uploads/${video.file_path}`}
               onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
+              onPause={handleVideoPause}
+              onEnded={handleVideoEnded}
               controls
             />
           </div>
