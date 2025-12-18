@@ -8,11 +8,31 @@ node_modules/
 .env.*.local
 server/.env
 client/.env
+backend/.env
 
 # Build outputs
 dist/
 build/
+
+# Python
+__pycache__/
+*/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+*.egg-info/
+.eggs/
+
+# Logs
+logs/
 *.log
+
+# Large ML model files
+*.pt
+*.pkl
+*.onnx
+backend/backend/models/
 
 # IDE
 .vscode/
@@ -27,6 +47,9 @@ Thumbs.db
 # Uploads
 uploads/
 server/uploads/
+client/backend/uploads/
+backend/uploads/
+backend/backend/uploads/
 videos/
 
 # Database
@@ -37,3 +60,8 @@ videos/
 coverage/
 .nyc_output/
 
+# Debug
+debug/
+
+# Misc
+cd
