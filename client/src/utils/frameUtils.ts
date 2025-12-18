@@ -37,3 +37,5 @@ export function shouldSendFrame(
   return frameHash !== lastFrameHash;
 }
 
+
+

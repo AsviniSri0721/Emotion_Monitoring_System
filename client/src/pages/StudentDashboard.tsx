@@ -48,6 +48,32 @@ const StudentDashboard: React.FC = () => {
     fetchSessions();
   }, []);
 
+  // Poll session status to detect when teacher ends the session
+  useEffect(() => {
+    if (!activeMonitoringSession) return;
+
+    const checkSessionStatus = async () => {
+      try {
+        const response = await liveSessionsApi.getAvailable();
+        const currentSession = response.sessions.find(s => s.id === activeMonitoringSession.id);
+        
+        // If session is ended or not found, stop monitoring
+        if (!currentSession || currentSession.status === 'ended') {
+          console.log('[StudentDashboard] Session ended by teacher, stopping monitoring...');
+          stopMonitoringInternal();
+        }
+      } catch (error) {
+        console.error('Error checking session status:', error);
+      }
+    };
+
+    // Check every 5 seconds
+    const intervalId = setInterval(checkSessionStatus, 5000);
+
+    return () => clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMonitoringSession]);
+
   // Draw bounding box on webcam video
   useEffect(() => {
     if (!overlayCanvasRef.current || !webcamRef.current || !emotionResult?.bbox) {
@@ -224,7 +250,7 @@ const StudentDashboard: React.FC = () => {
     }
   };
 
-  const stopMonitoring = () => {
+  const stopMonitoringInternal = () => {
     // Stop detection
     stopDetection();
     setMonitoringEnabled(false);
@@ -321,9 +347,9 @@ const StudentDashboard: React.FC = () => {
                   <h3 style={{ margin: 0, color: '#2e7d32' }}>
                     🟢 Monitoring Active - {activeMonitoringSession.title}
                   </h3>
-                  <button className="btn btn-secondary" onClick={stopMonitoring}>
-                    Stop Monitoring
-                  </button>
+                  <span style={{ fontSize: '0.85rem', color: '#666' }}>
+                    Monitoring will stop when teacher ends the session
+                  </span>
                 </div>
                 
                 <div style={{ display: 'flex', gap: '2rem', flexWrap: 'wrap' }}>
