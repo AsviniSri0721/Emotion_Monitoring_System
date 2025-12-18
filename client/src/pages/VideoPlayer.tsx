@@ -309,7 +309,7 @@ const VideoPlayer: React.FC = () => {
           
           <div className="intervention-activity">
             <a
-              href="https://www.youtube.com/watch?v=p7GmO8ewjmw&list=RDp7GmO8ewjmw&start_radio=1"
+              href="https://www.youtube.com/watch?v=vhaYnT08kLI"
               target="_blank"
               rel="noopener noreferrer"
               className="btn btn-primary"
