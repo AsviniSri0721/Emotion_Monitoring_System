@@ -399,7 +399,7 @@ const TeacherDashboard: React.FC = () => {
                 />
               </div>
               <div className="form-group">
-                <label>Google Meet URL (optional)</label>
+                <label>Google Meet URL </label>
                 <input
                   type="url"
                   value={sessionForm.meetUrl}
