@@ -3,6 +3,7 @@ import { Navigate, Route, BrowserRouter as Router, Routes } from 'react-router-d
 import './App.css';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import LiveMonitoring from './pages/LiveMonitoring';
+import InterventionVideoPlayer from './pages/InterventionVideoPlayer';
 import LiveSession from './pages/LiveSession';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -11,9 +12,9 @@ import StudentDashboard from './pages/StudentDashboard';
 import TeacherDashboard from './pages/TeacherDashboard';
 import VideoPlayer from './pages/VideoPlayer';
 
-const PrivateRoute: React.FC<{ children: React.ReactNode; allowedRoles: ('teacher' | 'student')[] }> = ({ 
-  children, 
-  allowedRoles 
+const PrivateRoute: React.FC<{ children: React.ReactNode; allowedRoles: ('teacher' | 'student')[] }> = ({
+  children,
+  allowedRoles
 }) => {
   const { user, loading, token } = useAuth();
 
@@ -24,7 +25,7 @@ const PrivateRoute: React.FC<{ children: React.ReactNode; allowedRoles: ('teache
 
   // Check if user has a valid token (even if user data is still loading)
   const hasToken = token || localStorage.getItem('token');
-  
+
   // If no token at all, redirect to login
   if (!hasToken) {
     return <Navigate to="/login" replace />;
@@ -61,7 +62,7 @@ const PrivateRoute: React.FC<{ children: React.ReactNode; allowedRoles: ('teache
 const RootRoute: React.FC = () => {
   const token = localStorage.getItem('token');
   const userStr = localStorage.getItem('user');
-  
+
   if (token && userStr) {
     try {
       const user = JSON.parse(userStr);
@@ -70,7 +71,7 @@ const RootRoute: React.FC = () => {
       return <Navigate to="/login" replace />;
     }
   }
-  
+
   return <Navigate to="/login" replace />;
 };
 
@@ -81,7 +82,7 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          
+
           <Route
             path="/teacher/dashboard"
             element={
@@ -90,7 +91,7 @@ function App() {
               </PrivateRoute>
             }
           />
-          
+
           <Route
             path="/student/dashboard"
             element={
@@ -99,7 +100,7 @@ function App() {
               </PrivateRoute>
             }
           />
-          
+
           <Route
             path="/video/:id"
             element={
@@ -108,7 +109,16 @@ function App() {
               </PrivateRoute>
             }
           />
-          
+
+          <Route
+            path="/intervention-video/:id"
+            element={
+              <PrivateRoute allowedRoles={['student', 'teacher']}>
+                <InterventionVideoPlayer />
+              </PrivateRoute>
+            }
+          />
+
           <Route
             path="/live/:id"
             element={
@@ -117,7 +127,7 @@ function App() {
               </PrivateRoute>
             }
           />
-          
+
           <Route
             path="/monitoring/live/:id"
             element={
@@ -126,7 +136,7 @@ function App() {
               </PrivateRoute>
             }
           />
-          
+
           <Route
             path="/report/:sessionType/:sessionId"
             element={
@@ -135,7 +145,7 @@ function App() {
               </PrivateRoute>
             }
           />
-          
+
           <Route path="/" element={<RootRoute />} />
         </Routes>
       </Router>

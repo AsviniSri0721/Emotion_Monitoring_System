@@ -53,7 +53,7 @@ export function deriveLearningState(
   // This prevents single-frame boredom spikes from triggering disengagement
   if (
     concentration < 40 &&
-    (emotions.boredom || 0) > 0.5  // Increased threshold from 0.2 to 0.5
+    (emotions.boredom || 0) > 0.3  // Lowered threshold to 0.3 for better responsiveness
   ) {
     return "DISENGAGED";
   }

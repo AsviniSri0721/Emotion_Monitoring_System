@@ -39,7 +39,7 @@ const StudentDashboard: React.FC = () => {
   } = useLiveSessionEmotionStream({
     videoElement: webcamRef.current, // May be null initially, hook handles this
     sessionId: activeMonitoringSession?.id || '',
-    interval: 5000,
+    interval: 200,
     enabled: monitoringEnabled && !!activeMonitoringSession?.id && !!webcamRef.current,
   });
 

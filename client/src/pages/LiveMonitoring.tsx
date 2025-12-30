@@ -24,7 +24,7 @@ const LiveMonitoring: React.FC = () => {
   } = useLiveSessionEmotionStream({
     videoElement: webcamRef.current,
     sessionId: id || '',
-    interval: 5000, // 5 seconds for live sessions
+    interval: 200,
     enabled: cameraPermissionGranted && !!id,
   });
 

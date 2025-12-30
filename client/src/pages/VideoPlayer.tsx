@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation, useSearchParams } from 'react-router-dom';
+import { interventionVideosApi, InterventionVideo } from '../api/interventionVideos';
 import EngagementMeter from '../components/EngagementMeter';
 import { useEmotionStream } from '../hooks/useEmotionStream';
 import api from '../services/api';
@@ -17,7 +18,12 @@ const VideoPlayer: React.FC = () => {
   const [showIntervention, setShowIntervention] = useState(false);
   const [interventionStartTime, setInterventionStartTime] = useState<number | null>(null);
   const [interventionId, setInterventionId] = useState<string | null>(null);
+  const [resumeTime, setResumeTime] = useState<number | null>(null);
+
   const [emotionDetectionEnabled, setEmotionDetectionEnabled] = useState(false);
+  const [availableInterventions, setAvailableInterventions] = useState<InterventionVideo[]>([]);
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
 
   // Use the emotion stream hook (now uses learning states internally)
   const {
@@ -32,13 +38,93 @@ const VideoPlayer: React.FC = () => {
     videoElement: webcamRef.current,
     sessionType: 'recorded',
     sessionId: id || '',
-    interval: 1000, // 1 second for more real-time updates
+    interval: 500, // 500ms for faster updates
     enabled: emotionDetectionEnabled && !!id,
   });
+  // Handle auto-resume once video element is ready
+  useEffect(() => {
+    if (video && videoRef.current) {
+      const startTime = searchParams.get('t');
+      const shouldAutoPlay = searchParams.get('autoPlay') === 'true';
+
+      const handleMetadataLoaded = async () => {
+        if (!videoRef.current) return;
+
+        if (startTime) {
+          console.log(`[VideoPlayer] Resuming at timestamp: ${startTime}`);
+          videoRef.current.currentTime = parseFloat(startTime);
+        }
+
+        if (shouldAutoPlay) {
+          console.log('[VideoPlayer] Auto-playing...');
+          try {
+            await videoRef.current.play();
+            setIsPlaying(true);
+            startEmotionDetection();
+          } catch (e) {
+            console.error("Auto-play failed:", e);
+          }
+        }
+      };
+
+      // If metadata already loaded, run immediately
+      if (videoRef.current.readyState >= 1) {
+        handleMetadataLoaded();
+      } else {
+        videoRef.current.addEventListener('loadedmetadata', handleMetadataLoaded);
+      }
+
+      return () => {
+        videoRef.current?.removeEventListener('loadedmetadata', handleMetadataLoaded);
+      };
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [video]); // Run when video data loads
+
+
+
+  const fetchVideo = async () => {
+    try {
+      const response = await api.get(`/videos/${id}`);
+      setVideo(response.data.video);
+
+
+
+    } catch (error) {
+      console.error('Error fetching video:', error);
+    }
+  };
+
+  const joinSession = async () => {
+    try {
+      await api.post(`/sessions/recorded/${id}/join`);
+    } catch (error) {
+      console.error('Error joining session:', error);
+    }
+  };
+
+  const leaveSession = async () => {
+    try {
+      await api.post(`/sessions/recorded/${id}/leave`);
+    } catch (error) {
+      console.error('Error leaving session:', error);
+    }
+  };
 
   useEffect(() => {
     fetchVideo();
     joinSession();
+
+    // Fetch available interventions
+    const loadInterventions = async () => {
+      try {
+        const data = await interventionVideosApi.getAll();
+        setAvailableInterventions(data.videos || []);
+      } catch (e) {
+        console.error("Failed to load interventions", e);
+      }
+    };
+    loadInterventions();
 
     return () => {
       stopDetection();
@@ -107,15 +193,15 @@ const VideoPlayer: React.FC = () => {
       videoRect: rect,
       videoDisplaySize: { width: video.clientWidth, height: video.clientHeight }
     });
-    
+
     // Scale from original image size (640x480 or videoWidth x videoHeight) to canvas display size
     const scaledX1 = x1 * scaleX;
     const scaledY1 = y1 * scaleY;
     const scaledX2 = x2 * scaleX;
     const scaledY2 = y2 * scaleY;
-    
+
     console.log('[VideoPlayer] Scaled bbox:', {
-      scaled: { x1: scaledX1, y1: scaledY1, x2: scaledX2, y2: scaledY2 },
+      scaled: { x1: scaledX1, y1: scaledY1, x2: scaledX2, y2: scaledY1 },
       width: scaledX2 - scaledX1,
       height: scaledY2 - scaledY1
     });
@@ -131,7 +217,7 @@ const VideoPlayer: React.FC = () => {
     const textMetrics = ctx.measureText(labelText);
     const labelWidth = textMetrics.width + 8;
     const labelHeight = 20;
-    
+
     ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
     ctx.fillRect(scaledX1, scaledY1 - labelHeight - 2, labelWidth, labelHeight);
 
@@ -139,31 +225,6 @@ const VideoPlayer: React.FC = () => {
     ctx.fillStyle = '#00ff00';
     ctx.fillText(labelText, scaledX1 + 4, scaledY1 - 6);
   }, [emotionResult]);
-
-  const fetchVideo = async () => {
-    try {
-      const response = await api.get(`/videos/${id}`);
-      setVideo(response.data.video);
-    } catch (error) {
-      console.error('Error fetching video:', error);
-    }
-  };
-
-  const joinSession = async () => {
-    try {
-      await api.post(`/sessions/recorded/${id}/join`);
-    } catch (error) {
-      console.error('Error joining session:', error);
-    }
-  };
-
-  const leaveSession = async () => {
-    try {
-      await api.post(`/sessions/recorded/${id}/leave`);
-    } catch (error) {
-      console.error('Error leaving session:', error);
-    }
-  };
 
   const triggerIntervention = async (triggeredEmotion: string) => {
     if (showIntervention) return; // Already showing intervention
@@ -185,9 +246,12 @@ const VideoPlayer: React.FC = () => {
 
       setShowIntervention(true);
       setInterventionStartTime(Date.now());
-      
-      // Pause video
+
+      // Pause video and save time
       if (videoRef.current) {
+        const currentTime = videoRef.current.currentTime;
+        console.log(`[VideoPlayer] Intervention triggered. Saving time: ${currentTime}`);
+        setResumeTime(currentTime);
         videoRef.current.pause();
         setIsPlaying(false);
       }
@@ -200,18 +264,16 @@ const VideoPlayer: React.FC = () => {
     if (!interventionStartTime) return;
 
     const duration = Math.floor((Date.now() - interventionStartTime) / 1000);
-    
+
     // Always resume video and close intervention, even if API call fails
     const resumeVideo = () => {
       setShowIntervention(false);
       setInterventionStartTime(null);
       setInterventionId(null);
 
-      // Resume video
-      if (videoRef.current) {
-        videoRef.current.play();
-        setIsPlaying(true);
-      }
+      // Note: We cannot play videoRef here because it is currently null (unmounted).
+      // The video will remount, and onLoadedMetadata will handle the resume logic 
+      // using the resumeTime state.
     };
 
     // Try to complete intervention in backend if we have an ID
@@ -234,9 +296,9 @@ const VideoPlayer: React.FC = () => {
 
   const startEmotionDetection = async (): Promise<boolean> => {
     if (!webcamRef.current || !id) {
-      console.log('[VideoPlayer] Cannot start emotion detection:', { 
-        hasWebcam: !!webcamRef.current, 
-        hasId: !!id 
+      console.log('[VideoPlayer] Cannot start emotion detection:', {
+        hasWebcam: !!webcamRef.current,
+        hasId: !!id
       });
       return false;
     }
@@ -300,25 +362,41 @@ const VideoPlayer: React.FC = () => {
     const learningState = emotionResult?.learningState || 'DISENGAGED';
     const interventionTitle = getInterventionTitle(learningState as any);
     const interventionMessage = getInterventionMessage(learningState as any);
-    
+
     return (
       <div className="intervention-container">
         <div className="intervention-content">
           <h2>{interventionTitle}</h2>
           <p>{interventionMessage}</p>
-          
+
           <div className="intervention-activity">
-            <a
-              href="https://www.youtube.com/watch?v=vhaYnT08kLI"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-primary"
-              style={{ marginBottom: '1rem', display: 'inline-block' }}
-            >
-              Try Interactive Activity
-            </a>
+            {availableInterventions.length > 0 ? (
+              <button
+                onClick={() => {
+                  const currentTime = videoRef.current ? videoRef.current.currentTime : 0;
+                  const returnPath = `${location.pathname}?t=${currentTime}&autoPlay=true`;
+                  // Pass the DB intervention ID so we can complete it later
+                  const interventionSessionIdValue = interventionId || '';
+                  navigate(`/intervention-video/${availableInterventions[0].id}?returnUrl=${encodeURIComponent(returnPath)}&interventionSessionId=${interventionSessionIdValue}`);
+                }}
+                className="btn btn-primary"
+                style={{ marginBottom: '1rem', display: 'inline-block' }}
+              >
+                Watch Intervention Video ({availableInterventions[0].duration}s)
+              </button>
+            ) : (
+              <a
+                href="https://www.youtube.com/watch?v=vhaYnT08kLI"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-primary"
+                style={{ marginBottom: '1rem', display: 'inline-block' }}
+              >
+                Try Interactive Activity
+              </a>
+            )}
           </div>
-          
+
           <button className="btn btn-secondary" onClick={completeIntervention}>
             Continue Learning
           </button>
@@ -344,7 +422,23 @@ const VideoPlayer: React.FC = () => {
               src={`${process.env.REACT_APP_API_URL?.replace('/api', '') || 'http://localhost:5000'}/uploads/${video.file_path}`}
               onPlay={() => setIsPlaying(true)}
               onPause={handleVideoPause}
-              onEnded={handleVideoEnded}
+              onLoadedMetadata={() => {
+                console.log('[VideoPlayer] Video metadata loaded.');
+                // Case 1: Returning from "Continue Learning" (same page) using state
+                if (resumeTime !== null && videoRef.current) {
+                  console.log(`[VideoPlayer] restoring from state resumeTime: ${resumeTime}`);
+                  videoRef.current.currentTime = resumeTime;
+                  videoRef.current.play()
+                    .then(() => {
+                      setIsPlaying(true);
+                      startEmotionDetection();
+                    })
+                    .catch(e => console.error("State resume failed:", e));
+                  setResumeTime(null);
+                }
+                // Case 2: Returning from external Intervention Video URL
+                // (Handled by the initial useEffect check for URL params 't' and 'autoPlay')
+              }}
               controls
             />
           </div>
@@ -406,7 +500,7 @@ const VideoPlayer: React.FC = () => {
                   </p>
                 )}
               </div>
-              
+
               {emotionResult.allEmotions && (
                 <div className="all-emotions-display" style={{ marginTop: '1rem', padding: '1rem', background: '#f9f9f9', borderRadius: '8px' }}>
                   <h4 style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: '#666' }}>Emotion Levels:</h4>
@@ -417,44 +511,44 @@ const VideoPlayer: React.FC = () => {
                         // Ensure value is a number (handle undefined/null)
                         const emotionValue = typeof value === 'number' ? value : 0;
                         return (
-                        <div 
-                          key={emotion} 
-                          className="emotion-row"
-                          style={{ 
-                            display: 'flex', 
-                            alignItems: 'center',
-                            gap: '0.5rem',
-                            padding: '0.5rem',
-                            background: 'white',
-                            borderRadius: '4px',
-                            border: '1px solid #e0e0e0'
-                          }}
-                        >
-                          <span 
-                            className="emotion-label"
-                            style={{ 
-                              textTransform: 'capitalize', 
-                              fontWeight: '500',
-                              minWidth: '100px',
-                              fontSize: '0.85rem'
+                          <div
+                            key={emotion}
+                            className="emotion-row"
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.5rem',
+                              padding: '0.5rem',
+                              background: 'white',
+                              borderRadius: '4px',
+                              border: '1px solid #e0e0e0'
                             }}
                           >
-                            {emotion}:
-                          </span>
-                          <progress 
-                            value={emotionValue * 100} 
-                            max="100" 
-                            style={{ 
-                              flex: 1,
-                              height: '20px',
-                              borderRadius: '4px'
-                            }}
-                          />
-                          <span style={{ color: '#666', fontWeight: 'bold', minWidth: '45px', textAlign: 'right', fontSize: '0.85rem' }}>
-                            {Math.round(emotionValue * 100)}%
-                          </span>
-                        </div>
-                      );
+                            <span
+                              className="emotion-label"
+                              style={{
+                                textTransform: 'capitalize',
+                                fontWeight: '500',
+                                minWidth: '100px',
+                                fontSize: '0.85rem'
+                              }}
+                            >
+                              {emotion}:
+                            </span>
+                            <progress
+                              value={emotionValue * 100}
+                              max="100"
+                              style={{
+                                flex: 1,
+                                height: '20px',
+                                borderRadius: '4px'
+                              }}
+                            />
+                            <span style={{ color: '#666', fontWeight: 'bold', minWidth: '45px', textAlign: 'right', fontSize: '0.85rem' }}>
+                              {Math.round(emotionValue * 100)}%
+                            </span>
+                          </div>
+                        );
                       })}
                   </div>
                 </div>

@@ -145,15 +145,6 @@ export const useLiveSessionEmotionStream = ({
       // Calculate smoothed emotions
       let smoothedEmotions = averageEmotions(emotionBufferRef.current);
       
-      // Reduce boredom weight during stable frames (if emotions unchanged for 8+ frames)
-      if (stableFrameCountRef.current > 8 && smoothedEmotions.boredom) {
-        smoothedEmotions = {
-          ...smoothedEmotions,
-          boredom: smoothedEmotions.boredom * 0.7
-        };
-        console.log(`[LiveEmotionStream] Reduced boredom weight (stable frames: ${stableFrameCountRef.current})`);
-      }
-      
       // Compute concentration from smoothed emotions (frontend calculation)
       const concentrationScore = calculateConcentration(smoothedEmotions);
       

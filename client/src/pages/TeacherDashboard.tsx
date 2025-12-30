@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LiveSession, liveSessionsApi } from '../api/liveSessions';
+import { InterventionVideo, interventionVideosApi } from '../api/interventionVideos';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import './Dashboard.css';
@@ -31,16 +32,20 @@ const TeacherDashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [videos, setVideos] = useState<Video[]>([]);
+  const [interventionVideos, setInterventionVideos] = useState<InterventionVideo[]>([]);
   const [sessions, setSessions] = useState<LiveSession[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
-  const [activeTab, setActiveTab] = useState<'videos' | 'sessions' | 'reports'>('videos');
+  const [activeTab, setActiveTab] = useState<'videos' | 'sessions' | 'reports' | 'interventions'>('videos');
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showInterventionUploadModal, setShowInterventionUploadModal] = useState(false);
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [uploadForm, setUploadForm] = useState({ title: '', description: '', file: null as File | null });
+  const [interventionUploadForm, setInterventionUploadForm] = useState({ title: '', description: '', duration: 60, file: null as File | null });
   const [sessionForm, setSessionForm] = useState({ title: '', description: '', scheduledAt: '', meetUrl: '' });
 
   useEffect(() => {
     fetchVideos();
+    fetchInterventionVideos();
     fetchSessions();
     fetchReports();
   }, []);
@@ -51,6 +56,15 @@ const TeacherDashboard: React.FC = () => {
       setVideos(response.data.videos);
     } catch (error) {
       console.error('Error fetching videos:', error);
+    }
+  };
+
+  const fetchInterventionVideos = async () => {
+    try {
+      const response = await interventionVideosApi.getAll();
+      setInterventionVideos(response.videos);
+    } catch (error) {
+      console.error('Error fetching intervention videos:', error);
     }
   };
 
@@ -89,7 +103,7 @@ const TeacherDashboard: React.FC = () => {
     // Validate file type
     const allowedExtensions = ['mp4', 'webm', 'ogg', 'avi', 'mov'];
     const fileExtension = uploadForm.file.name.split('.').pop()?.toLowerCase();
-    
+
     if (!fileExtension || !allowedExtensions.includes(fileExtension)) {
       alert('Invalid file type. Please use: mp4, webm, ogg, avi, or mov');
       return;
@@ -109,7 +123,7 @@ const TeacherDashboard: React.FC = () => {
       });
 
       const response = await api.post('/videos/upload', formData);
-      
+
       console.log('Upload response:', response.data);
       alert('Video uploaded successfully!');
       setShowUploadModal(false);
@@ -118,7 +132,7 @@ const TeacherDashboard: React.FC = () => {
     } catch (error: any) {
       console.error('Error uploading video:', error);
       console.error('Error response:', error.response);
-      
+
       let errorMessage = 'Failed to upload video';
       if (error.response) {
         errorMessage = error.response.data?.error || error.response.data?.details || `Server error: ${error.response.status}`;
@@ -127,8 +141,33 @@ const TeacherDashboard: React.FC = () => {
       } else {
         errorMessage = error.message;
       }
-      
+
       alert(`Upload failed: ${errorMessage}\n\nCheck:\n1. Backend is running on port 5000\n2. Database connection is working\n3. File size is under 500MB\n4. File format is supported (mp4, webm, ogg, avi, mov)`);
+    }
+  };
+
+  const handleInterventionUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!interventionUploadForm.file) {
+      alert('Please select a video file');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('video', interventionUploadForm.file);
+    formData.append('title', interventionUploadForm.title || 'Untitled');
+    formData.append('description', interventionUploadForm.description || '');
+    formData.append('duration', interventionUploadForm.duration.toString());
+
+    try {
+      await interventionVideosApi.upload(formData);
+      alert('Intervention video uploaded successfully!');
+      setShowInterventionUploadModal(false);
+      setInterventionUploadForm({ title: '', description: '', duration: 60, file: null });
+      fetchInterventionVideos();
+    } catch (error: any) {
+      console.error('Error uploading intervention video:', error);
+      alert(error.response?.data?.error || 'Failed to upload video');
     }
   };
 
@@ -211,6 +250,12 @@ const TeacherDashboard: React.FC = () => {
             onClick={() => setActiveTab('reports')}
           >
             Reports
+          </button>
+          <button
+            className={activeTab === 'interventions' ? 'tab active' : 'tab'}
+            onClick={() => setActiveTab('interventions')}
+          >
+            Interventions
           </button>
         </div>
 
@@ -325,6 +370,27 @@ const TeacherDashboard: React.FC = () => {
             </div>
           </div>
         )}
+
+        {activeTab === 'interventions' && (
+          <div>
+            <div className="section-header">
+              <h2>Intervention Content</h2>
+              <button className="btn btn-primary" onClick={() => setShowInterventionUploadModal(true)}>
+                Upload Intervention
+              </button>
+            </div>
+            <div className="grid">
+              {interventionVideos.map((video) => (
+                <div key={video.id} className="card">
+                  <h3>{video.title}</h3>
+                  <p>{video.description || 'No description'}</p>
+                  <p><strong>Redirect Duration:</strong> {video.duration}s</p>
+                  <p className="text-muted">Uploaded: {new Date(video.created_at).toLocaleDateString()}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {showUploadModal && (
@@ -412,6 +478,59 @@ const TeacherDashboard: React.FC = () => {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary">Create</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showInterventionUploadModal && (
+        <div className="modal-overlay" onClick={() => setShowInterventionUploadModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Upload Intervention Video</h2>
+            <form onSubmit={handleInterventionUpload}>
+              <div className="form-group">
+                <label>Title</label>
+                <input
+                  type="text"
+                  value={interventionUploadForm.title}
+                  onChange={(e) => setInterventionUploadForm({ ...interventionUploadForm, title: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Description</label>
+                <textarea
+                  value={interventionUploadForm.description}
+                  onChange={(e) => setInterventionUploadForm({ ...interventionUploadForm, description: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>Redirect Duration (seconds)</label>
+                <input
+                  type="number"
+                  min="5"
+                  max="300"
+                  value={interventionUploadForm.duration}
+                  onChange={(e) => setInterventionUploadForm({ ...interventionUploadForm, duration: parseInt(e.target.value) || 60 })}
+                  required
+                />
+                <small className="text-muted">How long student must watch before being redirected back.</small>
+              </div>
+              <div className="form-group">
+                <label>Video File</label>
+                <input
+                  type="file"
+                  accept="video/*"
+                  onChange={(e) => setInterventionUploadForm({ ...interventionUploadForm, file: e.target.files?.[0] || null })}
+                  required
+                />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowInterventionUploadModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">Upload</button>
               </div>
             </form>
           </div>

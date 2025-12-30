@@ -104,6 +104,16 @@ CREATE TABLE IF NOT EXISTS interventions (
     FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Intervention Videos table (renamed to clips to handle potential tablespace conflicts)
+CREATE TABLE IF NOT EXISTS intervention_clips (
+    id VARCHAR(36) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    file_path VARCHAR(500) NOT NULL,
+    duration INTEGER NOT NULL, -- redirect duration in seconds
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for performance
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_role ON users(role);

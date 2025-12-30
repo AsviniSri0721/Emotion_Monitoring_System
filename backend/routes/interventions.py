@@ -1,16 +1,141 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from werkzeug.utils import secure_filename
 from utils.jwt_helpers import get_current_user
 from services.database import execute_query
 import logging
 import uuid
+import os
 
 bp = Blueprint('interventions', __name__)
 logger = logging.getLogger(__name__)
 
+ALLOWED_EXTENSIONS = {'mp4', 'webm', 'ogg', 'avi', 'mov'}
+
 def generate_uuid_str():
     """Generate UUID string for database"""
     return str(uuid.uuid4())
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@bp.route('/videos', methods=['GET'])
+@jwt_required()
+def get_intervention_videos():
+    try:
+        results = execute_query(
+            """SELECT id, title, description, file_path, duration, created_at
+               FROM intervention_clips
+               ORDER BY created_at DESC""",
+            fetch_all=True
+        )
+        
+        videos = []
+        for row in results:
+            videos.append({
+                'id': row[0] if isinstance(row[0], str) else str(row[0]),
+                'title': row[1],
+                'description': row[2],
+                'file_path': row[3],
+                'duration': row[4],
+                'created_at': row[5].isoformat() if row[5] else None
+            })
+        
+        return jsonify({'videos': videos})
+    except Exception as e:
+        logger.error(f"Get intervention videos error: {str(e)}")
+        return jsonify({'error': 'Failed to fetch videos'}), 500
+
+@bp.route('/videos/upload', methods=['POST'])
+@jwt_required()
+def upload_intervention_video():
+    try:
+        current_user = get_current_user()
+        if current_user['role'] != 'teacher':
+            return jsonify({'error': 'Unauthorized - Teacher role required'}), 403
+
+        if 'video' not in request.files:
+            return jsonify({'error': 'No video file provided'}), 400
+        
+        file = request.files['video']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+            
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'Invalid file type'}), 400
+
+        # Form data
+        title = request.form.get('title', 'Untitled')
+        description = request.form.get('description', '')
+        try:
+            duration = int(request.form.get('duration', 60)) # Default 60s
+        except ValueError:
+            return jsonify({'error': 'Invalid duration format'}), 400
+
+        # Save file
+        upload_dir = current_app.config['UPLOAD_FOLDER']
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        filename = f"intervention_{uuid.uuid4()}{os.path.splitext(file.filename)[1]}"
+        filepath = os.path.join(upload_dir, filename)
+        file.save(filepath)
+        
+        # Save to DB
+        video_id = generate_uuid_str()
+        try:
+            execute_query(
+                """INSERT INTO intervention_clips (id, title, description, file_path, duration)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (video_id, title, description, filename, duration)
+            )
+        except Exception as db_error:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            raise db_error
+
+        return jsonify({
+            'video': {
+                'id': video_id,
+                'title': title,
+                'description': description,
+                'file_path': filename,
+                'duration': duration
+            },
+            'message': 'Intervention video uploaded successfully'
+        }), 201
+
+    except Exception as e:
+        logger.error(f"Intervention video upload error: {str(e)}")
+        return jsonify({'error': 'Failed to upload video'}), 500
+
+@bp.route('/videos/<video_id>', methods=['GET'])
+@jwt_required()
+def get_intervention_video(video_id):
+    try:
+        result = execute_query(
+            """SELECT id, title, description, file_path, duration, created_at
+               FROM intervention_clips
+               WHERE id = %s""",
+            (video_id,),
+            fetch_one=True
+        )
+        
+        if not result:
+            return jsonify({'error': 'Video not found'}), 404
+            
+        return jsonify({
+            'video': {
+                'id': result[0] if isinstance(result[0], str) else str(result[0]),
+                'title': result[1],
+                'description': result[2],
+                'file_path': result[3],
+                'duration': result[4],
+                'created_at': result[5].isoformat() if result[5] else None
+            }
+        })
+    except Exception as e:
+        logger.error(f"Get intervention video error: {str(e)}")
+        return jsonify({'error': 'Failed to fetch video'}), 500
 
 @bp.route('/trigger', methods=['POST'])
 @jwt_required()
