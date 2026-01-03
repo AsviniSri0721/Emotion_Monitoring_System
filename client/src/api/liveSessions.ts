@@ -107,5 +107,19 @@ export const liveSessionsApi = {
     const response = await api.get(`/live-sessions/${sessionId}/report`);
     return response.data;
   },
+
+  /**
+   * Delete a live session (Teacher only)
+   */
+  delete: async (sessionId: string): Promise<void> => {
+    await api.delete(`/sessions/live/${sessionId}`);
+  },
+
+  /**
+   * Update a live session (Teacher only)
+   */
+  update: async (sessionId: string, data: { title?: string; description?: string; meetUrl?: string; scheduledAt?: string }): Promise<void> => {
+    await api.put(`/sessions/live/${sessionId}`, data);
+  },
 };
 

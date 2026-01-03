@@ -1,6 +1,18 @@
 .dashboard {
   min-height: 100vh;
-  background-color: #f5f5f5;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .tabs {
@@ -8,6 +20,18 @@
   gap: 1rem;
   margin-bottom: 2rem;
   border-bottom: 2px solid #ddd;
+  animation: slideDown 0.4s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .tab {
@@ -18,17 +42,41 @@
   cursor: pointer;
   font-size: 1rem;
   color: #666;
-  transition: all 0.3s;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.tab::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transform: translateX(-50%);
 }
 
 .tab:hover {
   color: #007bff;
+  transform: translateY(-2px);
+}
+
+.tab:hover::before {
+  width: 80%;
 }
 
 .tab.active {
   color: #007bff;
-  border-bottom-color: #007bff;
   font-weight: 600;
+  transform: translateY(-2px);
+}
+
+.tab.active::before {
+  width: 100%;
+  background: linear-gradient(90deg, #4facfe 0%, #00f2fe 100%);
 }
 
 .section-header {
@@ -47,31 +95,97 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 1.5rem;
+  animation: fadeInUp 0.6s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .card {
   background: white;
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 1.5rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: cardSlideIn 0.5s ease-out backwards;
+  position: relative;
+  overflow: hidden;
 }
 
+.card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.5s;
+}
+
+.card:hover::before {
+  left: 100%;
+}
+
+@keyframes cardSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.card:nth-child(1) { animation-delay: 0.1s; }
+.card:nth-child(2) { animation-delay: 0.2s; }
+.card:nth-child(3) { animation-delay: 0.3s; }
+.card:nth-child(4) { animation-delay: 0.4s; }
+.card:nth-child(5) { animation-delay: 0.5s; }
+.card:nth-child(n+6) { animation-delay: 0.6s; }
+
 .card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-8px) scale(1.02);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+  border: 2px solid rgba(79, 172, 254, 0.3);
 }
 
 .card h3 {
   margin: 0 0 0.5rem 0;
   color: #333;
   font-size: 1.2rem;
+  transition: color 0.3s ease;
+  animation: textGlow 2s ease-in-out infinite;
+}
+
+@keyframes textGlow {
+  0%, 100% {
+    text-shadow: 0 0 5px rgba(79, 172, 254, 0.3);
+  }
+  50% {
+    text-shadow: 0 0 10px rgba(79, 172, 254, 0.5);
+  }
+}
+
+.card:hover h3 {
+  color: #007bff;
+  animation: none;
 }
 
 .card p {
   margin: 0.5rem 0;
   color: #666;
   line-height: 1.5;
+  transition: color 0.3s ease;
 }
 
 .text-muted {
@@ -83,6 +197,12 @@
   margin-top: 1rem;
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.card-actions .btn {
+  flex: 1;
+  min-width: 80px;
 }
 
 .table-container {
@@ -151,5 +271,82 @@ table tbody tr:hover {
   gap: 1rem;
   justify-content: flex-end;
   margin-top: 1.5rem;
+}
+
+/* Monitoring section animations */
+.monitoring-section {
+  animation: pulseBorder 2s ease-in-out infinite;
+  position: relative;
+}
+
+@keyframes pulseBorder {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(76, 175, 80, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(76, 175, 80, 0);
+  }
+}
+
+/* Button animations for student dashboard */
+.student-dashboard .btn-primary {
+  animation: gentlePulse 2s ease-in-out infinite;
+}
+
+@keyframes gentlePulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  }
+  50% {
+    transform: scale(1.02);
+    box-shadow: 0 6px 16px rgba(102, 126, 234, 0.5);
+  }
+}
+
+.student-dashboard .btn-primary:hover {
+  animation: none;
+}
+
+/* Tab content animation */
+.tab-content {
+  animation: fadeInContent 0.4s ease-out;
+}
+
+@keyframes fadeInContent {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Status badge animation */
+.status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  animation: statusPulse 2s ease-in-out infinite;
+}
+
+.status-badge.live {
+  background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+  color: white;
+}
+
+@keyframes statusPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.05);
+  }
 }
 

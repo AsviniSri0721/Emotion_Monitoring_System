@@ -23,7 +23,7 @@ interface UseLiveSessionEmotionStreamOptions {
 export const useLiveSessionEmotionStream = ({
   videoElement,
   sessionId,
-  interval = 5000, // 5 seconds for live sessions
+  interval = 200, 
   enabled = true,
 }: UseLiveSessionEmotionStreamOptions) => {
   const [emotionResult, setEmotionResult] = useState<LiveEmotionStreamResult | null>(null);

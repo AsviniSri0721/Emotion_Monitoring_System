@@ -39,9 +39,15 @@ const TeacherDashboard: React.FC = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showInterventionUploadModal, setShowInterventionUploadModal] = useState(false);
   const [showSessionModal, setShowSessionModal] = useState(false);
+  const [showEditVideoModal, setShowEditVideoModal] = useState(false);
+  const [showEditSessionModal, setShowEditSessionModal] = useState(false);
+  const [editingVideo, setEditingVideo] = useState<Video | null>(null);
+  const [editingSession, setEditingSession] = useState<LiveSession | null>(null);
   const [uploadForm, setUploadForm] = useState({ title: '', description: '', file: null as File | null });
   const [interventionUploadForm, setInterventionUploadForm] = useState({ title: '', description: '', duration: 60, file: null as File | null });
   const [sessionForm, setSessionForm] = useState({ title: '', description: '', scheduledAt: '', meetUrl: '' });
+  const [editVideoForm, setEditVideoForm] = useState({ title: '', description: '' });
+  const [editSessionForm, setEditSessionForm] = useState({ title: '', description: '', scheduledAt: '', meetUrl: '' });
 
   useEffect(() => {
     fetchVideos();
@@ -221,6 +227,103 @@ const TeacherDashboard: React.FC = () => {
     }
   };
 
+  const deleteVideo = async (videoId: string) => {
+    if (!window.confirm('Are you sure you want to delete this video? This action cannot be undone.')) {
+      return;
+    }
+    try {
+      await api.delete(`/videos/${videoId}`);
+      alert('Video deleted successfully!');
+      fetchVideos();
+    } catch (error: any) {
+      console.error('Error deleting video:', error);
+      alert(error.response?.data?.error || 'Failed to delete video');
+    }
+  };
+
+  const editVideo = (video: Video) => {
+    setEditingVideo(video);
+    setEditVideoForm({ title: video.title, description: video.description || '' });
+    setShowEditVideoModal(true);
+  };
+
+  const handleUpdateVideo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingVideo) return;
+    try {
+      await api.put(`/videos/${editingVideo.id}`, {
+        title: editVideoForm.title,
+        description: editVideoForm.description,
+      });
+      alert('Video updated successfully!');
+      setShowEditVideoModal(false);
+      setEditingVideo(null);
+      fetchVideos();
+    } catch (error: any) {
+      console.error('Error updating video:', error);
+      alert(error.response?.data?.error || 'Failed to update video');
+    }
+  };
+
+  const deleteSession = async (sessionId: string) => {
+    if (!window.confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
+      return;
+    }
+    try {
+      await liveSessionsApi.delete(sessionId);
+      alert('Session deleted successfully!');
+      fetchSessions();
+    } catch (error: any) {
+      console.error('Error deleting session:', error);
+      alert(error.response?.data?.error || 'Failed to delete session');
+    }
+  };
+
+  const editSession = (session: LiveSession) => {
+    setEditingSession(session);
+    setEditSessionForm({
+      title: session.title,
+      description: session.description || '',
+      scheduledAt: session.scheduled_at ? new Date(session.scheduled_at).toISOString().slice(0, 16) : '',
+      meetUrl: session.meet_url || '',
+    });
+    setShowEditSessionModal(true);
+  };
+
+  const handleUpdateSession = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSession) return;
+    try {
+      await liveSessionsApi.update(editingSession.id, {
+        title: editSessionForm.title,
+        description: editSessionForm.description,
+        scheduledAt: editSessionForm.scheduledAt || undefined,
+        meetUrl: editSessionForm.meetUrl || undefined,
+      });
+      alert('Session updated successfully!');
+      setShowEditSessionModal(false);
+      setEditingSession(null);
+      fetchSessions();
+    } catch (error: any) {
+      console.error('Error updating session:', error);
+      alert(error.response?.data?.error || 'Failed to update session');
+    }
+  };
+
+  const deleteReport = async (reportId: string) => {
+    if (!window.confirm('Are you sure you want to delete this report? This action cannot be undone.')) {
+      return;
+    }
+    try {
+      await api.delete(`/reports/${reportId}`);
+      alert('Report deleted successfully!');
+      fetchReports();
+    } catch (error: any) {
+      console.error('Error deleting report:', error);
+      alert(error.response?.data?.error || 'Failed to delete report');
+    }
+  };
+
   return (
     <div className="dashboard">
       <div className="header">
@@ -273,6 +376,14 @@ const TeacherDashboard: React.FC = () => {
                   <h3>{video.title}</h3>
                   <p>{video.description || 'No description'}</p>
                   <p className="text-muted">Uploaded: {new Date(video.created_at).toLocaleDateString()}</p>
+                  <div className="card-actions">
+                    <button className="btn btn-primary" onClick={() => editVideo(video)}>
+                      Edit
+                    </button>
+                    <button className="btn btn-danger" onClick={() => deleteVideo(video.id)}>
+                      Delete
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -312,6 +423,12 @@ const TeacherDashboard: React.FC = () => {
                         End Session
                       </button>
                     )}
+                    <button className="btn btn-primary" onClick={() => editSession(session)}>
+                      Edit
+                    </button>
+                    <button className="btn btn-danger" onClick={() => deleteSession(session.id)}>
+                      Delete
+                    </button>
                   </div>
                 </div>
               ))}
@@ -354,14 +471,22 @@ const TeacherDashboard: React.FC = () => {
                       <td>{report.engagement_drops}</td>
                       <td>{new Date(report.generated_at).toLocaleDateString()}</td>
                       <td>
-                        <button
-                          className="btn btn-sm btn-primary"
-                          onClick={() =>
-                            navigate(`/report/${report.session_type}/${report.session_id}`)
-                          }
-                        >
-                          View Details
-                        </button>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button
+                            className="btn btn-sm btn-primary"
+                            onClick={() =>
+                              navigate(`/report/${report.session_type}/${report.session_id}`)
+                            }
+                          >
+                            View Details
+                          </button>
+                          <button
+                            className="btn btn-sm btn-danger"
+                            onClick={() => deleteReport(report.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -531,6 +656,87 @@ const TeacherDashboard: React.FC = () => {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary">Upload</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showEditVideoModal && editingVideo && (
+        <div className="modal-overlay" onClick={() => setShowEditVideoModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Edit Video</h2>
+            <form onSubmit={handleUpdateVideo}>
+              <div className="form-group">
+                <label>Title</label>
+                <input
+                  type="text"
+                  value={editVideoForm.title}
+                  onChange={(e) => setEditVideoForm({ ...editVideoForm, title: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Description</label>
+                <textarea
+                  value={editVideoForm.description}
+                  onChange={(e) => setEditVideoForm({ ...editVideoForm, description: e.target.value })}
+                />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowEditVideoModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">Update</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showEditSessionModal && editingSession && (
+        <div className="modal-overlay" onClick={() => setShowEditSessionModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Edit Live Session</h2>
+            <form onSubmit={handleUpdateSession}>
+              <div className="form-group">
+                <label>Title</label>
+                <input
+                  type="text"
+                  value={editSessionForm.title}
+                  onChange={(e) => setEditSessionForm({ ...editSessionForm, title: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Description</label>
+                <textarea
+                  value={editSessionForm.description}
+                  onChange={(e) => setEditSessionForm({ ...editSessionForm, description: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>Scheduled At</label>
+                <input
+                  type="datetime-local"
+                  value={editSessionForm.scheduledAt}
+                  onChange={(e) => setEditSessionForm({ ...editSessionForm, scheduledAt: e.target.value })}
+                />
+              </div>
+              <div className="form-group">
+                <label>Google Meet URL</label>
+                <input
+                  type="url"
+                  value={editSessionForm.meetUrl}
+                  onChange={(e) => setEditSessionForm({ ...editSessionForm, meetUrl: e.target.value })}
+                  placeholder="https://meet.google.com/..."
+                />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowEditSessionModal(false)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">Update</button>
               </div>
             </form>
           </div>

@@ -232,5 +232,97 @@ def get_video(video_id):
         logger.error(f"Get video error: {str(e)}")
         return jsonify({'error': 'Failed to fetch video'}), 500
 
+@bp.route('/<video_id>', methods=['DELETE'])
+@jwt_required()
+def delete_video(video_id):
+    """Delete a video (teacher only, owner only)"""
+    try:
+        current_user = get_current_user()
+        if current_user['role'] != 'teacher':
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Check if video exists and belongs to current teacher
+        result = execute_query(
+            """SELECT v.id, v.file_path, v.teacher_id
+               FROM videos v
+               WHERE v.id = %s""",
+            (video_id,),
+            fetch_one=True
+        )
+        
+        if not result:
+            return jsonify({'error': 'Video not found'}), 404
+        
+        if result[2] != current_user['id']:
+            return jsonify({'error': 'Unauthorized - You can only delete your own videos'}), 403
+        
+        # Delete file from filesystem
+        file_path = result[1]
+        if file_path:
+            full_path = os.path.join(current_app.config['UPLOAD_FOLDER'], file_path)
+            if os.path.exists(full_path):
+                try:
+                    os.remove(full_path)
+                    logger.info(f"Deleted video file: {full_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete video file: {str(e)}")
+        
+        # Delete from database
+        execute_query(
+            """DELETE FROM videos WHERE id = %s""",
+            (video_id,)
+        )
+        
+        return jsonify({'message': 'Video deleted successfully'}), 200
+        
+    except Exception as e:
+        logger.error(f"Delete video error: {str(e)}")
+        return jsonify({'error': 'Failed to delete video'}), 500
+
+@bp.route('/<video_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_video(video_id):
+    """Update video title and description (teacher only, owner only)"""
+    try:
+        current_user = get_current_user()
+        if current_user['role'] != 'teacher':
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Check if video exists and belongs to current teacher
+        result = execute_query(
+            """SELECT v.id, v.teacher_id
+               FROM videos v
+               WHERE v.id = %s""",
+            (video_id,),
+            fetch_one=True
+        )
+        
+        if not result:
+            return jsonify({'error': 'Video not found'}), 404
+        
+        if result[1] != current_user['id']:
+            return jsonify({'error': 'Unauthorized - You can only edit your own videos'}), 403
+        
+        data = request.get_json()
+        title = data.get('title')
+        description = data.get('description')
+        
+        if not title:
+            return jsonify({'error': 'Title is required'}), 400
+        
+        # Update video
+        execute_query(
+            """UPDATE videos 
+               SET title = %s, description = %s, updated_at = NOW()
+               WHERE id = %s""",
+            (title, description or '', video_id)
+        )
+        
+        return jsonify({'message': 'Video updated successfully'}), 200
+        
+    except Exception as e:
+        logger.error(f"Update video error: {str(e)}")
+        return jsonify({'error': 'Failed to update video'}), 500
+
 # Video serving is handled in app.py
 

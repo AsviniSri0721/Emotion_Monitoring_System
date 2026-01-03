@@ -62,14 +62,14 @@ class LiveSession:
     
     @staticmethod
     def get_available() -> list:
-        """Get all available live sessions"""
+        """Get all available live sessions (including ended ones - they persist until manually deleted)"""
         results = execute_query(
             """SELECT ls.id, ls.teacher_id, ls.title, ls.meet_url, ls.scheduled_at, 
                       ls.status, ls.created_at,
                       CONCAT(u.first_name, ' ', u.last_name) as teacher_name
                FROM live_sessions ls
                JOIN users u ON ls.teacher_id = u.id
-               WHERE ls.status IN ('scheduled', 'live')
+               WHERE ls.status IN ('scheduled', 'live', 'ended')
                ORDER BY ls.scheduled_at DESC""",
             None,
             fetch_all=True
@@ -228,6 +228,7 @@ class LiveSessionLog:
             'dominant_emotion': dominant_emotion,
             'emotion_counts': emotion_counts
         }
+
 
 
 

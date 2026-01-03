@@ -100,7 +100,8 @@ class LiveSessionService:
         
         confidence = emotion_probs[emotion_label]
         emotion_state = model_service.map_emotion_to_state(emotion_label)
-        engagement_score = concentration / 100.0  # Convert to 0-1 range
+        # Calculate proper engagement score based on emotions, not just concentration/100
+        engagement_score = model_service._calculate_engagement(emotion_probs, emotion_label)
         
         # Save to live_session_logs table (NOT emotion_data)
         try:

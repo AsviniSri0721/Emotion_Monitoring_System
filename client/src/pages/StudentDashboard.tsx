@@ -286,7 +286,7 @@ const StudentDashboard: React.FC = () => {
   }, []);
 
   return (
-    <div className="dashboard">
+    <div className="dashboard student-dashboard">
       <div className="header">
         <h1>Student Dashboard</h1>
         <div className="header-actions">
@@ -312,7 +312,7 @@ const StudentDashboard: React.FC = () => {
         </div>
 
         {activeTab === 'videos' && (
-          <div>
+          <div className="tab-content">
             <h2>Available Lectures</h2>
             <div className="grid">
               {videos.map((video) => (
@@ -331,7 +331,7 @@ const StudentDashboard: React.FC = () => {
         )}
 
         {activeTab === 'sessions' && (
-          <div>
+          <div className="tab-content">
             <h2>Upcoming & Live Sessions</h2>
             
             {/* Active Monitoring Section - Show when session is set (video element needs to exist) */}
@@ -446,7 +446,9 @@ const StudentDashboard: React.FC = () => {
                   <p className="text-muted">
                     Scheduled: {session.scheduled_at ? new Date(session.scheduled_at).toLocaleString() : 'Not scheduled'}
                   </p>
-                  <p className="text-muted">Status: {session.status}</p>
+                  <p className="text-muted">
+                    Status: <span className={`status-badge ${session.status === 'live' ? 'live' : ''}`}>{session.status}</span>
+                  </p>
                   {(session.status === 'scheduled' || session.status === 'live') && (
                     <div>
                       <p style={{ fontSize: '0.85rem', color: '#666', marginBottom: '0.5rem', fontWeight: '500' }}>

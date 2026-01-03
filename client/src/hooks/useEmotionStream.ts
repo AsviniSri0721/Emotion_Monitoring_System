@@ -26,7 +26,7 @@ export const useEmotionStream = ({
   videoElement,
   sessionType,
   sessionId,
-  interval = 1000, // 1 second for more real-time updates
+  interval = 1000, 
   enabled = true,
 }: UseEmotionStreamOptions) => {
   const [emotionResult, setEmotionResult] = useState<EmotionStreamResult | null>(null);

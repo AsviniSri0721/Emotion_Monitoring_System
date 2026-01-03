@@ -244,3 +244,116 @@ def end_live_session(session_id):
         logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({'error': 'Failed to end session'}), 500
 
+@bp.route('/live/<session_id>', methods=['DELETE'])
+@jwt_required()
+def delete_live_session(session_id):
+    """
+    Delete a live session (teacher only, owner only)
+    
+    NOTE: This will delete the session record but will PRESERVE:
+    - Engagement reports (engagement_reports table) - these remain for historical analysis
+    - Live session logs (live_session_logs table) - these remain for historical data
+    
+    Only the session record itself is deleted. Reports and logs are kept for record-keeping purposes.
+    """
+    try:
+        current_user = get_current_user()
+        if current_user['role'] != 'teacher':
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Check if session exists and belongs to current teacher
+        result = execute_query(
+            """SELECT ls.id, ls.teacher_id
+               FROM live_sessions ls
+               WHERE ls.id = %s""",
+            (session_id,),
+            fetch_one=True
+        )
+        
+        if not result:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        if result[1] != current_user['id']:
+            return jsonify({'error': 'Unauthorized - You can only delete your own sessions'}), 403
+        
+        # Delete only the session record from live_sessions table
+        # Engagement reports and logs are preserved (no foreign key CASCADE constraint)
+        # This allows teachers to delete sessions while keeping historical data
+        execute_query(
+            """DELETE FROM live_sessions WHERE id = %s""",
+            (session_id,)
+        )
+        
+        logger.info(f"Session {session_id} deleted by teacher {current_user['id']}. Reports and logs preserved.")
+        
+        return jsonify({'message': 'Session deleted successfully. Engagement reports and logs have been preserved.'}), 200
+        
+    except Exception as e:
+        logger.error(f"Delete session error: {str(e)}")
+        return jsonify({'error': 'Failed to delete session'}), 500
+
+@bp.route('/live/<session_id>', methods=['PUT', 'PATCH'])
+@jwt_required()
+def update_live_session(session_id):
+    """Update live session details (teacher only, owner only)"""
+    try:
+        current_user = get_current_user()
+        if current_user['role'] != 'teacher':
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Check if session exists and belongs to current teacher
+        result = execute_query(
+            """SELECT ls.id, ls.teacher_id
+               FROM live_sessions ls
+               WHERE ls.id = %s""",
+            (session_id,),
+            fetch_one=True
+        )
+        
+        if not result:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        if result[1] != current_user['id']:
+            return jsonify({'error': 'Unauthorized - You can only edit your own sessions'}), 403
+        
+        data = request.get_json()
+        title = data.get('title')
+        description = data.get('description')
+        meet_url = data.get('meetUrl')
+        scheduled_at = data.get('scheduledAt')
+        
+        if not title:
+            return jsonify({'error': 'Title is required'}), 400
+        
+        # Build update query dynamically
+        updates = []
+        params = []
+        
+        if title:
+            updates.append("title = %s")
+            params.append(title)
+        if description is not None:
+            updates.append("description = %s")
+            params.append(description)
+        if meet_url is not None:
+            updates.append("meet_url = %s")
+            params.append(meet_url)
+        if scheduled_at is not None:
+            updates.append("scheduled_at = %s")
+            params.append(scheduled_at)
+        
+        if not updates:
+            return jsonify({'error': 'No fields to update'}), 400
+        
+        updates.append("updated_at = NOW()")
+        params.append(session_id)
+        
+        query = f"UPDATE live_sessions SET {', '.join(updates)} WHERE id = %s"
+        execute_query(query, tuple(params))
+        
+        return jsonify({'message': 'Session updated successfully'}), 200
+        
+    except Exception as e:
+        logger.error(f"Update session error: {str(e)}")
+        return jsonify({'error': 'Failed to update session'}), 500
+

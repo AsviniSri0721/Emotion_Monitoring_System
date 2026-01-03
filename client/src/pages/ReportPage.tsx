@@ -13,7 +13,6 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { liveSessionsApi } from '../api/liveSessions';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 import './ReportPage.css';
@@ -63,6 +62,8 @@ interface ReportData {
   }>;
   concentration_analysis?: ConcentrationAnalysis;
   emotion_segments?: EmotionSegment[];
+  session_id?: string;
+  student_id?: string;
 }
 
 const ReportPage: React.FC = () => {
@@ -72,6 +73,21 @@ const ReportPage: React.FC = () => {
   const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const deleteReport = async () => {
+    if (!report?.id) return;
+    if (!window.confirm('Are you sure you want to delete this report? This action cannot be undone.')) {
+      return;
+    }
+    try {
+      await api.delete(`/reports/${report.id}`);
+      alert('Report deleted successfully!');
+      navigate(-1);
+    } catch (error: any) {
+      console.error('Error deleting report:', error);
+      alert(error.response?.data?.error || 'Failed to delete report');
+    }
+  };
 
   useEffect(() => {
     if (sessionType && sessionId) {
@@ -83,45 +99,91 @@ const ReportPage: React.FC = () => {
   const fetchReport = async () => {
     try {
       setLoading(true);
-      // Use live session API for live sessions, regular API for recorded
-      if (sessionType === 'live' && sessionId) {
-        const response = await liveSessionsApi.getReport(sessionId);
-        // Transform live session report to match ReportData interface
-        const liveReport = response.report;
-        if (user?.role === 'teacher' && liveReport.students) {
-          // Teacher sees aggregated data
-          const firstStudent = liveReport.students[0];
-          if (firstStudent) {
-            setReport({
-              id: liveReport.session.id,
-              overall_engagement: liveReport.overall_avg_engagement || 0,
-              average_concentration: liveReport.overall_avg_concentration || 0,
-              average_emotion: firstStudent.dominant_emotion,
-              engagement_drops: 0, // Not calculated for live sessions
-              focus_percentage: (firstStudent.emotion_counts.focused || 0) / firstStudent.total_logs * 100,
-              boredom_percentage: (firstStudent.emotion_counts.bored || 0) / firstStudent.total_logs * 100,
-              confusion_percentage: (firstStudent.emotion_counts.confused || 0) / firstStudent.total_logs * 100,
-              sleepiness_percentage: (firstStudent.emotion_counts.sleepy || 0) / firstStudent.total_logs * 100,
-              timeline: firstStudent.timeline.map((t: any) => ({
-                emotion: t.emotion,
-                timestamp: t.timestamp,
-                concentration: t.concentration_score,
-                engagement_score: t.engagement_score,
-              })),
+      // Get report directly from engagement_reports table (this has the correct values)
+      if (sessionType && sessionId) {
+        const response = await api.get(`/reports/session/${sessionType}/${sessionId}`);
+        const reportData = response.data.report;
+        
+        // Calculate concentration analysis from timeline if available
+        let concentrationAnalysis: ConcentrationAnalysis | undefined = undefined;
+        if (reportData.timeline && reportData.timeline.length > 0) {
+          const concentrations = reportData.timeline.map((t: any) => t.concentration || 50.0);
+          const lowThreshold = 40;
+          const highThreshold = 60;
+          
+          let inLowConcentration = false;
+          let lowStart = 0;
+          let lowStartTimestamp = 0;
+          const events: ConcentrationEvent[] = [];
+          
+          for (let i = 0; i < concentrations.length; i++) {
+            const conc = concentrations[i];
+            const timestamp = reportData.timeline[i].timestamp || i;
+            
+            if (conc < lowThreshold && !inLowConcentration) {
+              // Start of drop
+              inLowConcentration = true;
+              lowStart = i;
+              lowStartTimestamp = timestamp;
+            } else if (conc >= highThreshold && inLowConcentration) {
+              // Recovery
+              inLowConcentration = false;
+              events.push({
+                type: 'drop',
+                start_timestamp: lowStartTimestamp,
+                end_timestamp: timestamp,
+                duration_seconds: timestamp - lowStartTimestamp,
+                start_concentration: concentrations[lowStart] || 50.0,
+                recovery_concentration: conc,
+              });
+            }
+          }
+          
+          // Handle ongoing drop at end
+          if (inLowConcentration) {
+            const lastTimestamp = reportData.timeline[reportData.timeline.length - 1].timestamp || reportData.timeline.length - 1;
+            events.push({
+              type: 'drop',
+              start_timestamp: lowStartTimestamp,
+              end_timestamp: lastTimestamp,
+              duration_seconds: lastTimestamp - lowStartTimestamp,
+              start_concentration: concentrations[lowStart] || 50.0,
+              recovery_concentration: null,
             });
           }
-        } else if (liveReport.student_data) {
-          // For students, generate report using the standard endpoint to get concentration analysis
-          const reportResponse = await api.post(`/reports/generate/live/${sessionId}`, {
-            studentId: user?.id,
-          });
-          setReport(reportResponse.data.report);
+          
+          const totalDropDuration = events.reduce((sum, e) => sum + e.duration_seconds, 0);
+          const avgDropDuration = events.length > 0 ? totalDropDuration / events.length : 0;
+          const longestDrop = events.length > 0 ? events.reduce((longest, e) => 
+            e.duration_seconds > longest.duration_seconds ? e : longest
+          ) : null;
+          
+          concentrationAnalysis = {
+            total_drops: events.length,
+            total_drop_duration_seconds: totalDropDuration,
+            average_drop_duration_seconds: avgDropDuration,
+            longest_drop: longestDrop,
+            events: events,
+          };
         }
+        
+        // Transform to match ReportData interface
+        setReport({
+          id: reportData.id,
+          overall_engagement: reportData.overall_engagement,
+          average_concentration: reportData.average_concentration || 0,
+          average_emotion: reportData.average_emotion,
+          engagement_drops: reportData.engagement_drops || 0,
+          focus_percentage: reportData.focus_percentage || 0,
+          boredom_percentage: reportData.boredom_percentage || 0,
+          confusion_percentage: reportData.confusion_percentage || 0,
+          sleepiness_percentage: reportData.sleepiness_percentage || 0,
+          timeline: reportData.timeline || [],
+          emotion_segments: reportData.emotion_segments || [],
+          concentration_analysis: concentrationAnalysis,
+        });
       } else {
-        // Recorded session - report generation not available
-        setError('Engagement reports are available only for live monitored sessions. Recorded videos are excluded to ensure accuracy and ethical data usage.');
-        setLoading(false);
-        return;
+        setError('Invalid session parameters');
       }
       setError(null);
     } catch (err: any) {
@@ -157,21 +219,50 @@ const ReportPage: React.FC = () => {
     { name: 'Sleepy', value: report.sleepiness_percentage, color: '#9e9e9e' },
   ].filter((item) => item.value > 0);
 
+  // Format timestamp - use actual time if available, otherwise format relative time
+  const formatTimestamp = (point: any): string => {
+    // If we have actual time from backend, use it
+    if (point.time_display) {
+      return point.time_display;
+    }
+    if (point.actual_time) {
+      const date = new Date(point.actual_time);
+      return date.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    // Fallback: format relative timestamp (seconds from start)
+    const seconds = point.timestamp || 0;
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+  };
+
   // Prepare data for line chart (concentration over time)
-  const concentrationData =
-    report.timeline?.map((point) => ({
-      time: point.timestamp,
-      concentration: point.concentration,
-      engagement: point.engagement_score * 100,
-    })) || [];
+  // Sort by timestamp to ensure proper ordering
+  const sortedTimeline = report.timeline ? [...report.timeline].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0)) : [];
+  const concentrationData = sortedTimeline.map((point) => ({
+    time: formatTimestamp(point),
+    timeSeconds: point.timestamp || 0, // Keep for sorting/ordering
+    concentration: point.concentration || 50.0,
+    engagement: (point.engagement_score || 0.5) * 100,
+  }));
 
   return (
     <div className="report-container">
       <div className="report-header">
-        <button className="btn btn-secondary" onClick={() => navigate(-1)}>
-          Back
-        </button>
-        <h1>Engagement Report</h1>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <button className="btn btn-secondary" onClick={() => navigate(-1)}>
+            Back
+          </button>
+          <h1 style={{ margin: 0, flex: 1 }}>Engagement Report</h1>
+          <button className="btn btn-danger" onClick={deleteReport}>
+            Delete Report
+          </button>
+        </div>
       </div>
 
       <div className="report-content">
@@ -237,9 +328,17 @@ const ReportPage: React.FC = () => {
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={concentrationData}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" label={{ value: 'Time (seconds)', position: 'insideBottom', offset: -5 }} />
-                  <YAxis label={{ value: 'Concentration (%)', angle: -90, position: 'insideLeft' }} />
-                  <Tooltip />
+                  <XAxis 
+                    dataKey="time" 
+                    label={{ value: 'Time', position: 'insideBottom', offset: -5 }}
+                    type="category"
+                    allowDuplicatedCategory={false}
+                  />
+                  <YAxis label={{ value: 'Percentage (%)', angle: -90, position: 'insideLeft' }} />
+                  <Tooltip 
+                    formatter={(value: number, name: string) => [`${value.toFixed(2)}%`, name]}
+                    labelFormatter={(label) => `Time: ${label}`}
+                  />
                   <Legend />
                   <Line
                     type="monotone"
@@ -263,26 +362,34 @@ const ReportPage: React.FC = () => {
           )}
         </div>
 
-        {/* Emotion Percentages */}
+        {/* Emotion Percentages - Only show non-zero values */}
         <div className="report-details">
           <h2>Emotion Breakdown</h2>
           <div className="emotion-breakdown">
-            <div className="emotion-item">
-              <span className="emotion-label">Focused:</span>
-              <span className="emotion-value">{report.focus_percentage.toFixed(1)}%</span>
-            </div>
-            <div className="emotion-item">
-              <span className="emotion-label">Bored:</span>
-              <span className="emotion-value">{report.boredom_percentage.toFixed(1)}%</span>
-            </div>
-            <div className="emotion-item">
-              <span className="emotion-label">Confused:</span>
-              <span className="emotion-value">{report.confusion_percentage.toFixed(1)}%</span>
-            </div>
-            <div className="emotion-item">
-              <span className="emotion-label">Sleepy:</span>
-              <span className="emotion-value">{report.sleepiness_percentage.toFixed(1)}%</span>
-            </div>
+            {report.focus_percentage > 0 && (
+              <div className="emotion-item">
+                <span className="emotion-label">Focused:</span>
+                <span className="emotion-value">{report.focus_percentage.toFixed(1)}%</span>
+              </div>
+            )}
+            {report.boredom_percentage > 0 && (
+              <div className="emotion-item">
+                <span className="emotion-label">Bored:</span>
+                <span className="emotion-value">{report.boredom_percentage.toFixed(1)}%</span>
+              </div>
+            )}
+            {report.confusion_percentage > 0 && (
+              <div className="emotion-item">
+                <span className="emotion-label">Confused:</span>
+                <span className="emotion-value">{report.confusion_percentage.toFixed(1)}%</span>
+              </div>
+            )}
+            {report.sleepiness_percentage > 0 && (
+              <div className="emotion-item">
+                <span className="emotion-label">Sleepy:</span>
+                <span className="emotion-value">{report.sleepiness_percentage.toFixed(1)}%</span>
+              </div>
+            )}
           </div>
         </div>
 

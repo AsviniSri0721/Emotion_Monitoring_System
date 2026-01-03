@@ -364,3 +364,197 @@ def generate_report(session_type, session_id):
         logger.error(f"Generate report error: {str(e)}")
         return jsonify({'error': 'Failed to generate report'}), 500
 
+@bp.route('/session/<session_type>/<session_id>', methods=['GET'])
+@jwt_required()
+def get_report_by_session(session_type, session_id):
+    """Get engagement report from engagement_reports table by session type and session ID"""
+    try:
+        current_user = get_current_user()
+        
+        # Get session start time for calculating actual timestamps
+        session_start = None
+        if session_type == 'live':
+            try:
+                session_info = execute_query(
+                    """SELECT ls.started_at, ls.created_at
+                       FROM live_sessions ls
+                       WHERE ls.id = %s""",
+                    (session_id,),
+                    fetch_one=True
+                )
+                if session_info:
+                    # Use started_at if available, otherwise use created_at
+                    session_start = session_info[0] if session_info[0] else (session_info[1] if len(session_info) > 1 else None)
+            except Exception as e:
+                logger.warning(f"Could not fetch session start time: {str(e)}")
+                session_start = None
+        
+        # For students, get their own report. For teachers, get the first report for that session
+        # Note: emotion_segments column may not exist in all database schemas, so we don't select it
+        if current_user['role'] == 'student':
+            result = execute_query(
+                """SELECT er.id, er.session_type, er.session_id, er.student_id,
+                          er.overall_engagement, er.average_emotion, er.engagement_drops,
+                          er.focus_percentage, er.boredom_percentage, er.confusion_percentage,
+                          er.sleepiness_percentage, er.emotional_timeline, er.behavior_summary,
+                          er.generated_at
+                   FROM engagement_reports er
+                   WHERE er.session_type = %s AND er.session_id = %s AND er.student_id = %s
+                   LIMIT 1""",
+                (session_type, session_id, current_user['id']),
+                fetch_one=True
+            )
+        else:
+            # Teacher - get first report for this session (or specific student if provided)
+            student_id = request.args.get('studentId')
+            if student_id:
+                result = execute_query(
+                    """SELECT er.id, er.session_type, er.session_id, er.student_id,
+                              er.overall_engagement, er.average_emotion, er.engagement_drops,
+                              er.focus_percentage, er.boredom_percentage, er.confusion_percentage,
+                              er.sleepiness_percentage, er.emotional_timeline, er.behavior_summary,
+                              er.generated_at
+                       FROM engagement_reports er
+                       WHERE er.session_type = %s AND er.session_id = %s AND er.student_id = %s
+                       LIMIT 1""",
+                    (session_type, session_id, student_id),
+                    fetch_one=True
+                )
+            else:
+                result = execute_query(
+                    """SELECT er.id, er.session_type, er.session_id, er.student_id,
+                              er.overall_engagement, er.average_emotion, er.engagement_drops,
+                              er.focus_percentage, er.boredom_percentage, er.confusion_percentage,
+                              er.sleepiness_percentage, er.emotional_timeline, er.behavior_summary,
+                              er.generated_at
+                       FROM engagement_reports er
+                       WHERE er.session_type = %s AND er.session_id = %s
+                       LIMIT 1""",
+                    (session_type, session_id),
+                    fetch_one=True
+                )
+        
+        if not result:
+            logger.warning(f"Report not found for session_type={session_type}, session_id={session_id}, user={current_user['id']}")
+            return jsonify({'error': 'Report not found'}), 404
+        
+        # Parse JSON fields - handle case where result might have fewer fields
+        import json
+        from datetime import datetime, timedelta
+        timeline_data = []
+        if len(result) > 11 and result[11]:  # emotional_timeline at index 11
+            try:
+                timeline_data = json.loads(result[11]) if isinstance(result[11], str) else result[11]
+                
+                # Convert relative timestamps to actual timestamps if session_start is available
+                if session_start and timeline_data:
+                    try:
+                        # Convert session_start to datetime if needed
+                        if isinstance(session_start, str):
+                            try:
+                                session_start_dt = datetime.fromisoformat(session_start.replace('Z', '+00:00'))
+                            except:
+                                # Try parsing MySQL datetime format
+                                session_start_dt = datetime.strptime(session_start, '%Y-%m-%d %H:%M:%S')
+                        elif hasattr(session_start, 'isoformat'):
+                            session_start_dt = session_start  # Already a datetime object
+                        else:
+                            session_start_dt = None
+                        
+                        if session_start_dt:
+                            for point in timeline_data:
+                                if isinstance(point, dict) and 'timestamp' in point:
+                                    # timestamp is seconds from session start
+                                    seconds_offset = int(point.get('timestamp', 0))
+                                    actual_time = session_start_dt + timedelta(seconds=seconds_offset)
+                                    point['actual_time'] = actual_time.isoformat()
+                                    point['time_display'] = actual_time.strftime('%H:%M:%S')
+                    except Exception as e:
+                        logger.warning(f"Error converting timestamps to actual time: {str(e)}")
+            except Exception as e:
+                logger.warning(f"Error parsing timeline: {str(e)}")
+                timeline_data = []
+        
+        # emotion_segments column may not exist in database, so we set it to None
+        emotion_segments = None
+        
+        # Calculate average concentration from timeline if available
+        avg_concentration = 50.0
+        if timeline_data:
+            try:
+                concentrations = [point.get('concentration', 50.0) for point in timeline_data if isinstance(point, dict) and 'concentration' in point]
+                if concentrations:
+                    avg_concentration = sum(concentrations) / len(concentrations)
+            except Exception as e:
+                logger.warning(f"Error calculating avg concentration: {str(e)}")
+                avg_concentration = 50.0
+        
+        # Safely access result fields
+        # Result structure: [id(0), session_type(1), session_id(2), student_id(3), 
+        #                   overall_engagement(4), average_emotion(5), engagement_drops(6),
+        #                   focus_percentage(7), boredom_percentage(8), confusion_percentage(9),
+        #                   sleepiness_percentage(10), emotional_timeline(11), behavior_summary(12),
+        #                   generated_at(13)]
+        report_data = {
+            'id': result[0] if len(result) > 0 else '',
+            'session_type': result[1] if len(result) > 1 else session_type,
+            'session_id': result[2] if len(result) > 2 else session_id,
+            'student_id': result[3] if len(result) > 3 else '',
+            'overall_engagement': float(result[4]) if len(result) > 4 and result[4] is not None else 0.0,
+            'average_emotion': result[5] if len(result) > 5 and result[5] else 'neutral',
+            'engagement_drops': int(result[6]) if len(result) > 6 and result[6] is not None else 0,
+            'focus_percentage': float(result[7]) if len(result) > 7 and result[7] is not None else 0.0,
+            'boredom_percentage': float(result[8]) if len(result) > 8 and result[8] is not None else 0.0,
+            'confusion_percentage': float(result[9]) if len(result) > 9 and result[9] is not None else 0.0,
+            'sleepiness_percentage': float(result[10]) if len(result) > 10 and result[10] is not None else 0.0,
+            'average_concentration': avg_concentration,
+            'timeline': timeline_data,
+            'emotion_segments': emotion_segments,  # Will be None if column doesn't exist
+            'generated_at': result[13].isoformat() if len(result) > 13 and result[13] else None
+        }
+        
+        return jsonify({'report': report_data}), 200
+        
+    except Exception as e:
+        logger.error(f"Get report error: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': 'Failed to fetch report', 'details': str(e)}), 500
+
+@bp.route('/<report_id>', methods=['DELETE'])
+@jwt_required()
+def delete_report(report_id):
+    """Delete an engagement report"""
+    try:
+        current_user = get_current_user()
+        
+        # Check if report exists and user has permission
+        result = execute_query(
+            """SELECT er.id, er.student_id, er.session_type, er.session_id
+               FROM engagement_reports er
+               WHERE er.id = %s""",
+            (report_id,),
+            fetch_one=True
+        )
+        
+        if not result:
+            return jsonify({'error': 'Report not found'}), 404
+        
+        # Students can only delete their own reports, teachers can delete any report
+        if current_user['role'] == 'student' and result[1] != current_user['id']:
+            return jsonify({'error': 'Unauthorized - You can only delete your own reports'}), 403
+        
+        # Delete the report
+        execute_query(
+            """DELETE FROM engagement_reports WHERE id = %s""",
+            (report_id,)
+        )
+        
+        logger.info(f"Report {report_id} deleted by user {current_user['id']}")
+        
+        return jsonify({'message': 'Report deleted successfully'}), 200
+        
+    except Exception as e:
+        logger.error(f"Delete report error: {str(e)}")
+        return jsonify({'error': 'Failed to delete report'}), 500
+
